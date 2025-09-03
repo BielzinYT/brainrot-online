@@ -20,6 +20,8 @@ const mapHeight = 800;
 const availableBases = [1,2,3,4,5,6]; // Track available base numbers
 let adminEventActive = false;
 let ownerId = null; // Track the owner (first player)
+const bots = {}; // Store bot instances
+let gameMode = 'online'; // Default mode
 
 // Propriedades do Tapete Transportador (agora vertical)
 const CONVEYOR_BELT_PROPS = {
@@ -163,10 +165,10 @@ function spawnBrainRot() {
     const randomRarity = getRandomRarity();
     const filteredRots = BRAIN_ROT_TYPES.filter(rot => rot.rarity === randomRarity);
     const rotType = filteredRots[Math.floor(Math.random() * filteredRots.length)];
-    
+
     // Posição horizontal aleatória dentro da largura do tapete
     const randomXOffset = Math.random() * (CONVEYOR_BELT_PROPS.width - 40); // 40 é a largura do item
-    
+
     brainRots[rotId] = {
         id: rotId,
         x: CONVEYOR_BELT_PROPS.x + randomXOffset, // Posição X aleatória dentro do tapete
@@ -179,8 +181,129 @@ function spawnBrainRot() {
     };
 }
 
+function spawnBots() {
+    const botCount = 5; // Spawn 5 bots
+    for (let i = 0; i < botCount; i++) {
+        if (availableBases.length === 0) break;
+
+        const baseNumber = availableBases.shift();
+        const baseId = `base-${baseNumber}`;
+        const botId = `bot-${baseNumber}`;
+
+        const botData = {
+            x: mapWidth / 4,
+            y: mapHeight / 2,
+            id: botId,
+            username: `Bot ${baseNumber}`,
+            baseId: baseId,
+            baseNumber: baseNumber,
+            inventory: [],
+            money: 250,
+            baseLocked: false,
+            baseLockTime: 0,
+            lastMoveTime: Date.now(),
+            lastPosition: { x: mapWidth / 4, y: mapHeight / 2 },
+            isBot: true
+        };
+
+        players[botId] = botData;
+        bots[botId] = botData;
+    }
+
+    // Send updated players to all clients
+    io.emit('updatePlayers', players);
+    io.emit('updateInventories', players);
+    io.emit('updateMoney', players);
+}
+
 // Spawna um Brain Rot a cada 1.5 segundos (ajustado para mais frequência)
 setInterval(spawnBrainRot, 1500);
+
+function updateBotBehavior(bot) {
+    // Find closest brainrot that bot can afford
+    let closestRot = null;
+    let closestDist = Infinity;
+
+    for (const rotId in brainRots) {
+        const rot = brainRots[rotId];
+        if (rot.owner) continue; // Already owned
+
+        const rotType = BRAIN_ROT_TYPES.find(type => type.name === rot.name);
+        if (!rotType || bot.money < rotType.price) continue; // Can't afford
+
+        const dist = Math.sqrt((bot.x - rot.x) ** 2 + (bot.y - rot.y) ** 2);
+        if (dist < closestDist) {
+            closestDist = dist;
+            closestRot = rot;
+        }
+    }
+
+    if (closestRot && closestDist < 100) { // Within pickup range
+        // Move towards brainrot
+        const dx = closestRot.x - bot.x;
+        const dy = closestRot.y - bot.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 5) {
+            bot.x += (dx / dist) * 3; // Bot speed
+            bot.y += (dy / dist) * 3;
+        } else {
+            // Pick up the brainrot
+            const rotType = BRAIN_ROT_TYPES.find(type => type.name === closestRot.name);
+            if (rotType && bot.money >= rotType.price && bot.inventory.length < 6) {
+                bot.money -= rotType.price;
+                closestRot.owner = bot.id;
+                closestRot.targetBase = bot.baseId;
+                bot.inventory.push({
+                    id: closestRot.id,
+                    name: closestRot.name,
+                    rarity: closestRot.rarity,
+                    class: closestRot.class
+                });
+                io.emit('updateBrainRots', brainRots);
+                io.emit('updateMoney', players);
+                io.emit('updateInventories', players);
+            }
+        }
+    } else {
+        // Random movement or steal attempt
+        if (Math.random() < 0.3) { // 30% chance to try stealing
+            // Find a random player to steal from
+            const playerIds = Object.keys(players).filter(id => id !== bot.id && !players[id].isBot);
+            if (playerIds.length > 0) {
+                const targetId = playerIds[Math.floor(Math.random() * playerIds.length)];
+                const target = players[targetId];
+                if (target && target.inventory.length > 0 && !target.baseLocked) {
+                    const rotIndex = Math.floor(Math.random() * target.inventory.length);
+                    const stolenRot = target.inventory.splice(rotIndex, 1)[0];
+                    bot.inventory.push(stolenRot);
+                    io.emit('updateInventories', players);
+                }
+            }
+        } else {
+            // Random movement
+            const directions = [
+                { dx: 3, dy: 0 },   // Right
+                { dx: -3, dy: 0 },  // Left
+                { dx: 0, dy: 3 },   // Down
+                { dx: 0, dy: -3 },  // Up
+                { dx: 2, dy: 2 },   // Diagonal
+                { dx: -2, dy: 2 },
+                { dx: 2, dy: -2 },
+                { dx: -2, dy: -2 }
+            ];
+            const dir = directions[Math.floor(Math.random() * directions.length)];
+            bot.x += dir.dx;
+            bot.y += dir.dy;
+
+            // Keep within bounds
+            bot.x = Math.max(0, Math.min(mapWidth - 30, bot.x));
+            bot.y = Math.max(0, Math.min(mapHeight - 30, bot.y));
+        }
+    }
+
+    // Update bot position for clients
+    io.emit('updatePlayers', players);
+}
 
 // Money generation
 setInterval(() => {
@@ -197,6 +320,19 @@ setInterval(() => {
     }
     io.emit('updateMoney', players);
 }, 1000); // Every second
+
+// Bot behavior
+setInterval(() => {
+    if (gameMode === 'ai') {
+        for (const botId in bots) {
+            const bot = bots[botId];
+            if (!bot) continue;
+
+            // Bot actions
+            updateBotBehavior(bot);
+        }
+    }
+}, 2000); // Every 2 seconds
 
 // Loop de atualização do servidor
 setInterval(() => {
@@ -242,59 +378,86 @@ setInterval(() => {
 io.on('connection', (socket) => {
     console.log('Um novo jogador se conectou:', socket.id);
 
-    // Limit to 6 players
-    if (availableBases.length === 0) {
-        socket.emit('serverFull', 'Servidor cheio! Máximo 6 jogadores.');
-        socket.disconnect();
-        return;
-    }
+    socket.on('joinGame', (data) => {
+        const { username, mode } = data;
+        gameMode = mode;
 
-    // Set owner if first player
-    if (ownerId === null) {
-        ownerId = socket.id;
-    }
+        // Handle different game modes
+        if (mode === 'solo') {
+            // Solo mode: only 1 player allowed
+            if (Object.keys(players).length > 0) {
+                socket.emit('serverFull', 'Modo Solo: Apenas 1 jogador permitido!');
+                socket.disconnect();
+                return;
+            }
+        } else if (mode === 'online') {
+            // Online mode: normal multiplayer
+            if (availableBases.length === 0) {
+                socket.emit('serverFull', 'Servidor cheio! Máximo 6 jogadores.');
+                socket.disconnect();
+                return;
+            }
+        } else if (mode === 'ai') {
+            // AI mode: player + bots
+            if (availableBases.length === 0) {
+                socket.emit('serverFull', 'Servidor cheio! Máximo 6 jogadores.');
+                socket.disconnect();
+                return;
+            }
+        }
 
-    // Assign the lowest available base
-    const baseNumber = availableBases.shift();
-    const baseId = `base-${baseNumber}`;
+        // Set owner if first player
+        if (ownerId === null) {
+            ownerId = socket.id;
+        }
 
-    // Always create new player with initial state
-    const playerData = {
-        x: mapWidth / 4,
-        y: mapHeight / 2,
-        id: socket.id,
-        baseId: baseId,
-        baseNumber: baseNumber,
-        inventory: [],
-        money: 250,
-        baseLocked: false,
-        baseLockTime: 0,
-        lastMoveTime: Date.now(),
-        lastPosition: { x: mapWidth / 4, y: mapHeight / 2 }
-    };
+        // Assign the lowest available base
+        const baseNumber = availableBases.shift();
+        const baseId = `base-${baseNumber}`;
 
-    players[socket.id] = playerData;
+        // Create new player with initial state
+        const playerData = {
+            x: mapWidth / 4,
+            y: mapHeight / 2,
+            id: socket.id,
+            username: username,
+            baseId: baseId,
+            baseNumber: baseNumber,
+            inventory: [],
+            money: 250,
+            baseLocked: false,
+            baseLockTime: 0,
+            lastMoveTime: Date.now(),
+            lastPosition: { x: mapWidth / 4, y: mapHeight / 2 }
+        };
 
-    socket.emit('updatePlayers', players);
-    socket.emit('updateBrainRots', brainRots);
-    socket.emit('assignBase', {
-        baseId,
-        playerId: socket.id,
-        baseNumber,
-        isOwner: baseNumber === 1,
-        dataRestored: false
+        players[socket.id] = playerData;
+
+        socket.emit('updatePlayers', players);
+        socket.emit('updateBrainRots', brainRots);
+        socket.emit('assignBase', {
+            baseId,
+            playerId: socket.id,
+            baseNumber,
+            isOwner: baseNumber === 1,
+            dataRestored: false
+        });
+
+        // Send inventory and money updates
+        setTimeout(() => {
+            io.emit('updateInventories', players);
+            io.emit('updateMoney', players);
+            socket.emit('updateInventories', players);
+            socket.emit('updateMoney', players);
+        }, 100);
+
+        socket.broadcast.emit('updatePlayers', players);
+
+        // If AI mode, spawn bots after player joins
+        if (mode === 'ai') {
+            spawnBots();
+        }
     });
-
-    // Send inventory and money updates to all clients to show restored data
-    setTimeout(() => {
-        io.emit('updateInventories', players);
-        io.emit('updateMoney', players);
-        // Also send specifically to the reconnecting player
-        socket.emit('updateInventories', players);
-        socket.emit('updateMoney', players);
-    }, 100); // Small delay to ensure base assignment is processed first
-
-    socket.broadcast.emit('updatePlayers', players);
 
     socket.on('playerMove', (data) => {
         const player = players[socket.id];
@@ -455,6 +618,11 @@ io.on('connection', (socket) => {
             // Make base available again
             availableBases.push(baseNumber);
             availableBases.sort();
+
+            // Remove from bots if it's a bot
+            if (bots[socket.id]) {
+                delete bots[socket.id];
+            }
 
             delete players[socket.id];
         }
