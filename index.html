@@ -451,14 +451,22 @@
     </div>
 
     <script>
-        let username = '';
+        let username = localStorage.getItem('brainrot_username') || '';
         let gameMode = '';
+
+        // Load saved username on page load
+        window.addEventListener('load', () => {
+            if (username) {
+                document.getElementById('username').value = username;
+            }
+        });
 
         // Login screen logic
         document.getElementById('enter-button').addEventListener('click', () => {
             const input = document.getElementById('username');
             if (input.value.trim()) {
                 username = input.value.trim();
+                localStorage.setItem('brainrot_username', username);
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('menu-screen').style.display = 'flex';
             } else {
@@ -483,12 +491,17 @@
             const brainRots = {};
             let myId;
             let myPlayer;
+            let isSpectator = false;
 
             // Send username and mode on connection
             socket.on('connect', () => {
                 console.log('Conectado ao servidor!');
                 myId = socket.id;
                 socket.emit('joinGame', { username, mode: gameMode });
+            });
+
+            socket.on('spectatorMode', (spectator) => {
+                isSpectator = spectator;
             });
 
         const CONVEYOR_BELT_PROPS = {
@@ -572,7 +585,7 @@
         };
 
         function gameLoop() {
-            if (myPlayer) {
+            if (myPlayer && !isSpectator) {
                 let dx = 0;
                 let dy = 0;
                 const speed = 6; // Increased to 6 for even faster movement
@@ -616,6 +629,22 @@
         socket.on('connect', () => {
             console.log('Conectado ao servidor!');
             myId = socket.id;
+        });
+
+        socket.on('spectatorMode', (isSpectator) => {
+            if (isSpectator) {
+                // Hide all bases since spectator can't play
+                for (let i = 1; i <= 6; i++) {
+                    const base = document.getElementById(`base-${i}`);
+                    if (base) {
+                        base.style.display = 'none';
+                    }
+                }
+                // Hide admin controls
+                document.getElementById('admin-controls').style.display = 'none';
+                // Show spectator message
+                document.getElementById('money-display').textContent = "Modo Espectador - Assistindo IA";
+            }
         });
 
         socket.on('assignBase', (data) => {
@@ -736,10 +765,11 @@
                     playerDiv.id = id;
                     const playerName = document.createElement('span');
                     playerName.classList.add('player-name');
-                    playerName.textContent = `Jogador ${Object.keys(players).length + 1}`;
                     if (id === myId) {
-                        playerName.textContent = "Você";
+                        playerName.textContent = username;
                         myPlayer = serverPlayers[id];
+                    } else {
+                        playerName.textContent = serverPlayers[id].username || `Jogador ${Object.keys(players).length + 1}`;
                     }
                     playerDiv.appendChild(playerName);
                     gameArea.appendChild(playerDiv);
@@ -786,7 +816,9 @@
                     brainRots[id] = rotDiv;
 
                     rotDiv.addEventListener('click', () => {
-                        socket.emit('pickUpBrainRot', { rotId: id });
+                        if (!isSpectator) {
+                            socket.emit('pickUpBrainRot', { rotId: id });
+                        }
                     });
                 }
                 const rotDiv = brainRots[id];
@@ -842,7 +874,7 @@
                                 }
                             }
 
-                            if (playerId !== myId) {
+                            if (playerId !== myId && !isSpectator) {
                                 // Allow stealing from other bases
                                 slots[index].addEventListener('click', () => {
                                     socket.emit('stealBrainRot', { targetPlayerId: playerId, rotId: rot.id });
@@ -897,7 +929,9 @@
             const lockBtn = document.getElementById(`lock-base-${i}`);
             if (lockBtn) {
                 lockBtn.addEventListener('click', () => {
-                    socket.emit('lockBase');
+                    if (!isSpectator) {
+                        socket.emit('lockBase');
+                    }
                 });
             }
         }
