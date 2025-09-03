@@ -421,6 +421,124 @@
         .mystic { background: radial-gradient(circle, #E6E6FA 0%, #DDA0DD 100%); color: #4B0082; border: 2px solid #8A2BE2; }
         .immortal { background: linear-gradient(45deg, #FFD700, #FF4500); color: #000; border: 2px solid #FFD700; }
         .absolute { background: linear-gradient(90deg, #000000, #FFFFFF, #000000); color: #FFF; border: 2px solid #FFF; }
+
+        /* Responsive Design */
+        @media (max-width: 1400px) {
+            #game-area {
+                width: 1000px;
+                height: 667px;
+            }
+
+            .base {
+                width: 200px;
+                height: 120px;
+            }
+
+            .slot {
+                width: 40px;
+                height: 40px;
+            }
+
+            .upgrade-btn {
+                width: 35px;
+                font-size: 7px;
+            }
+        }
+
+        @media (max-width: 1100px) {
+            #game-area {
+                width: 800px;
+                height: 533px;
+            }
+
+            .base {
+                width: 160px;
+                height: 96px;
+            }
+
+            .slot {
+                width: 32px;
+                height: 32px;
+                font-size: 6px;
+            }
+
+            .upgrade-btn {
+                width: 30px;
+                font-size: 6px;
+            }
+
+            .base-label {
+                font-size: 11px;
+            }
+        }
+
+        @media (max-width: 900px) {
+            body {
+                padding: 10px;
+            }
+
+            #game-area {
+                width: 100%;
+                max-width: 600px;
+                height: 400px;
+            }
+
+            .base {
+                width: 120px;
+                height: 72px;
+            }
+
+            .slot {
+                width: 24px;
+                height: 24px;
+                font-size: 5px;
+            }
+
+            .upgrade-btn {
+                width: 25px;
+                font-size: 5px;
+                padding: 2px;
+            }
+
+            .base-label {
+                font-size: 10px;
+            }
+
+            #money-display {
+                font-size: 14px;
+            }
+        }
+
+        @media (max-width: 600px) {
+            #game-area {
+                height: 300px;
+            }
+
+            .base {
+                width: 80px;
+                height: 48px;
+            }
+
+            .slot {
+                width: 16px;
+                height: 16px;
+                font-size: 4px;
+            }
+
+            .upgrade-btn {
+                width: 20px;
+                font-size: 4px;
+                padding: 1px;
+            }
+
+            .base-label {
+                font-size: 8px;
+            }
+
+            #money-display {
+                font-size: 12px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -485,6 +603,10 @@
         <div id="base-3" class="base" style="top: 325px; left: 50px;">
             <div class="base-label">Base 3</div>
             <button id="lock-base-3" class="lock-btn" style="display: none;">Bloquear Base (60s)</button>
+            <div class="upgrade-section" style="display: flex; gap: 5px; margin-bottom: 5px;">
+                <button id="upgrade-capacity-3" class="upgrade-btn capacity-btn" title="Aumentar Capacidade">Cap+</button>
+                <button id="upgrade-generation-3" class="upgrade-btn generation-btn" title="Aumentar Geração">Gen+</button>
+            </div>
             <div class="base-row">
                 <div class="slot"></div>
                 <div class="slot"></div>
@@ -499,6 +621,10 @@
         <div id="base-5" class="base" style="bottom: 50px; left: 50px;">
             <div class="base-label">Base 5</div>
             <button id="lock-base-5" class="lock-btn" style="display: none;">Bloquear Base (60s)</button>
+            <div class="upgrade-section" style="display: flex; gap: 5px; margin-bottom: 5px;">
+                <button id="upgrade-capacity-5" class="upgrade-btn capacity-btn" title="Aumentar Capacidade">Cap+</button>
+                <button id="upgrade-generation-5" class="upgrade-btn generation-btn" title="Aumentar Geração">Gen+</button>
+            </div>
             <div class="base-row">
                 <div class="slot"></div>
                 <div class="slot"></div>
@@ -514,6 +640,10 @@
         <div id="base-2" class="base" style="top: 50px; right: 50px;">
             <div class="base-label">Base 2</div>
             <button id="lock-base-2" class="lock-btn" style="display: none;">Bloquear Base (60s)</button>
+            <div class="upgrade-section" style="display: flex; gap: 5px; margin-bottom: 5px;">
+                <button id="upgrade-capacity-2" class="upgrade-btn capacity-btn" title="Aumentar Capacidade">Cap+</button>
+                <button id="upgrade-generation-2" class="upgrade-btn generation-btn" title="Aumentar Geração">Gen+</button>
+            </div>
             <div class="base-row">
                 <div class="slot"></div>
                 <div class="slot"></div>
@@ -528,6 +658,10 @@
         <div id="base-4" class="base" style="top: 325px; right: 50px;">
             <div class="base-label">Base 4</div>
             <button id="lock-base-4" class="lock-btn" style="display: none;">Bloquear Base (60s)</button>
+            <div class="upgrade-section" style="display: flex; gap: 5px; margin-bottom: 5px;">
+                <button id="upgrade-capacity-4" class="upgrade-btn capacity-btn" title="Aumentar Capacidade">Cap+</button>
+                <button id="upgrade-generation-4" class="upgrade-btn generation-btn" title="Aumentar Geração">Gen+</button>
+            </div>
             <div class="base-row">
                 <div class="slot"></div>
                 <div class="slot"></div>
@@ -542,6 +676,10 @@
         <div id="base-6" class="base" style="bottom: 50px; right: 50px;">
             <div class="base-label">Base 6</div>
             <button id="lock-base-6" class="lock-btn" style="display: none;">Bloquear Base (60s)</button>
+            <div class="upgrade-section" style="display: flex; gap: 5px; margin-bottom: 5px;">
+                <button id="upgrade-capacity-6" class="upgrade-btn capacity-btn" title="Aumentar Capacidade">Cap+</button>
+                <button id="upgrade-generation-6" class="upgrade-btn generation-btn" title="Aumentar Geração">Gen+</button>
+            </div>
             <div class="base-row">
                 <div class="slot"></div>
                 <div class="slot"></div>
@@ -654,17 +792,58 @@
             // Start background music when game starts
             soundManager.startBackgroundMusic();
 
-            // Particle system
+            // Object Pool for Brain Rots (performance optimization)
+            const brainRotPool = {
+                pool: [],
+                active: new Set(),
+
+                create: function() {
+                    let rotDiv = this.pool.pop();
+                    if (!rotDiv) {
+                        rotDiv = document.createElement('div');
+                        rotDiv.classList.add('brain-rot-item');
+                        gameArea.appendChild(rotDiv);
+                    }
+                    this.active.add(rotDiv);
+                    return rotDiv;
+                },
+
+                release: function(rotDiv) {
+                    if (this.active.has(rotDiv)) {
+                        rotDiv.style.display = 'none';
+                        this.active.delete(rotDiv);
+                        this.pool.push(rotDiv);
+                    }
+                },
+
+                clear: function() {
+                    for (const rotDiv of this.active) {
+                        rotDiv.style.display = 'none';
+                        this.pool.push(rotDiv);
+                    }
+                    this.active.clear();
+                }
+            };
+
+            // Particle system with object pooling
             const particleSystem = {
                 particles: [],
+                pool: [],
                 gameArea: gameArea,
 
                 createParticle: function(x, y, type, count = 5) {
                     for (let i = 0; i < count; i++) {
-                        const particle = document.createElement('div');
+                        let particle = this.pool.pop();
+                        if (!particle) {
+                            particle = document.createElement('div');
+                            particle.className = `particle ${type}-particle`;
+                            this.gameArea.appendChild(particle);
+                        }
+
                         particle.className = `particle ${type}-particle`;
                         particle.style.left = `${x}px`;
                         particle.style.top = `${y}px`;
+                        particle.style.display = 'block';
 
                         // Random velocity
                         const angle = Math.random() * Math.PI * 2;
@@ -677,7 +856,6 @@
                         particle.life = 60; // 60 frames lifetime
                         particle.gravity = 0.1;
 
-                        this.gameArea.appendChild(particle);
                         this.particles.push(particle);
                     }
                 },
@@ -688,7 +866,8 @@
                         particle.life--;
 
                         if (particle.life <= 0) {
-                            particle.remove();
+                            particle.style.display = 'none';
+                            this.pool.push(particle);
                             this.particles.splice(i, 1);
                             continue;
                         }
@@ -1034,7 +1213,7 @@
             for (let id in brainRots) {
                 if (!serverBrainRots[id]) {
                     if (brainRots[id]) {
-                        brainRots[id].remove();
+                        brainRotPool.release(brainRots[id]);
                     }
                     delete brainRots[id];
                 }
@@ -1044,13 +1223,14 @@
             for (let id in serverBrainRots) {
                 const rotData = serverBrainRots[id];
                 if (!brainRots[id]) {
-                    const rotDiv = document.createElement('div');
-                    rotDiv.classList.add('brain-rot-item', rotData.class);
+                    const rotDiv = brainRotPool.create();
+                    rotDiv.className = `brain-rot-item ${rotData.class}`;
                     rotDiv.id = `rot-${id}`;
+                    rotDiv.style.display = 'block';
+
                     const rotType = BRAIN_ROT_TYPES.find(type => type.name === rotData.name);
                     const price = rotType ? rotType.price : 0;
                     rotDiv.innerHTML = `${rotData.name}<br>(${rotData.rarity})<br><span style="color: #ffeb3b; font-weight: bold;">$${price}</span>`; // Exibe nome, raridade e preço em destaque
-                    gameArea.appendChild(rotDiv);
                     brainRots[id] = rotDiv;
 
                     // Create spawn particles
@@ -1068,7 +1248,8 @@
                         // Remove the element after animation
                         setTimeout(() => {
                             if (rotDiv.parentNode) {
-                                rotDiv.remove();
+                                brainRotPool.release(rotDiv);
+                                delete brainRots[id];
                             }
                         }, 300);
                     });
@@ -1213,8 +1394,9 @@
         const upgradeBtns = document.querySelectorAll('.upgrade-btn');
         upgradeBtns.forEach(btn => {
             btn.addEventListener('click', () => {
+                const baseNumber = btn.id.split('-')[2]; // Extract base number from button id
                 const upgradeType = btn.classList.contains('capacity-btn') ? 'capacity' : 'generation';
-                socket.emit('upgradeBase', { upgradeType });
+                socket.emit('upgradeBase', { upgradeType, baseNumber: parseInt(baseNumber) });
             });
         });
 
