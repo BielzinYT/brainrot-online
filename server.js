@@ -1,4 +1,4 @@
-// server.js
+i// server.js
 const express = require('express');
 const app = express();
 const http = require('http').createServer(app);
@@ -233,7 +233,8 @@ setInterval(() => {
             if (dist < 5) {
                 // Reached base, add to inventory if space
                 const player = players[rot.owner];
-                if (player && player.inventory.length < 6) {
+                const maxCapacity = BASE_UPGRADES.capacity.levels[player.upgrades.capacity];
+                if (player && player.inventory.length < maxCapacity) {
                     player.inventory.push({
                         id: rot.id,
                         name: rot.name,
@@ -257,6 +258,24 @@ setInterval(() => {
             }
         }
     }
+
+    // Clean up old brain rots that might have been missed
+    const currentTime = Date.now();
+    for (const rotId in brainRots) {
+        const rot = brainRots[rotId];
+        if (!rot.lastUpdate) {
+            rot.lastUpdate = currentTime;
+        }
+
+        // Remove brain rots that haven't been updated in 30 seconds (stuck items)
+        if (currentTime - rot.lastUpdate > 30000) {
+            delete brainRots[rotId];
+            continue;
+        }
+
+        rot.lastUpdate = currentTime;
+    }
+
     io.emit('updateBrainRots', brainRots);
 }, 1000 / 60); // Atualiza 60 vezes por segundo
 
@@ -492,14 +511,21 @@ io.on('connection', (socket) => {
         const player = players[socket.id];
         if (!player) return;
 
-        const { upgradeType } = data;
-        const currentLevel = player.upgrades[upgradeType];
+        const { upgradeType, baseNumber } = data;
 
         // Validate input
         if (!upgradeType || !['capacity', 'generation'].includes(upgradeType)) {
             socket.emit('upgradeFailed', 'Tipo de upgrade inválido.');
             return;
         }
+
+        // Validate that player owns the base they're trying to upgrade
+        if (baseNumber && baseNumber !== player.baseNumber) {
+            socket.emit('upgradeFailed', 'Você só pode fazer upgrade na sua própria base!');
+            return;
+        }
+
+        const currentLevel = player.upgrades[upgradeType];
 
         // Check if max level reached
         if (currentLevel >= BASE_UPGRADES[upgradeType].levels.length - 1) {
