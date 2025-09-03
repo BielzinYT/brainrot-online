@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador de Brain Rot Online</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px 20px 60px 20px; /* Extra bottom padding */
+            overflow: hidden;
+        }
+
+        #game-area {
+            position: relative;
+            width: 1200px;
+            height: 800px;
+            background-color: #333;
+            border: 5px solid #222;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+
+        #money-display {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #ffeb3b;
+            font-size: 18px;
+            font-weight: bold;
+            z-index: 200;
+        }
+
+        #event-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff0000;
+            font-size: 48px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px #000;
+            z-index: 300;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+
+        #admin-controls {
+            position: absolute;
+            bottom: 20px; /* At the bottom of the page */
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 5px;
+            z-index: 200;
+        }
+
+        #admin-controls button {
+            background-color: #ff0000;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        #admin-controls button:hover {
+            background-color: #cc0000;
+        }
+
+        #admin-button {
+            background-color: #ff4444;
+        }
+
+        #admin-button:hover {
+            background-color: #cc3333;
+        }
+
+        .player {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            background-color: #ffeb3b;
+            border-radius: 50%;
+            border: 2px solid #2c2c2c;
+            box-shadow: 0 0 10px rgba(255, 235, 59, 0.5);
+            z-index: 100;
+        }
+
+        .player-name {
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 12px;
+            color: white;
+            white-space: nowrap;
+        }
+
+        .base {
+            position: absolute;
+            width: 250px;
+            height: 150px;
+            border: 3px solid #6a1b9a;
+            background-color: #444;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            padding: 5px;
+            box-sizing: border-box;
+        }
+
+        .base-row {
+            display: flex;
+            gap: 5px;
+            justify-content: space-between;
+        }
+        
+        /* Ajuste para garantir que a base do jogador tenha a cor correta */
+        .base.my-base { 
+            border: 3px solid #ffeb3b;
+        }
+
+        .base-label {
+            position: absolute;
+            top: -20px;
+            left: 5px;
+            color: #e0e0e0;
+        }
+
+        .slot {
+            width: 50px;
+            height: 50px;
+            background-color: #555;
+            border: 2px dashed #777;
+            border-radius: 5px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+            text-align: center;
+            box-sizing: border-box;
+            word-wrap: break-word;
+        }
+
+        .sell-btn {
+            font-size: 6px;
+            padding: 2px 4px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .sell-btn:hover {
+            background-color: #45a049;
+        }
+
+        #conveyor-belt {
+            position: absolute;
+            width: 100px; /* Largura do tapete */
+            height: 700px; /* Altura do tapete */
+            background-color: #b71c1c;
+            border-radius: 15px;
+            border: 5px solid #8e0000;
+            box-shadow: 0 0 15px rgba(255, 0, 0, 0.5);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            overflow: hidden;
+        }
+
+        .brain-rot-item {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border-radius: 5px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+            text-align: center;
+            color: white;
+            z-index: 50; /* Para aparecer abaixo do player, mas acima do tapete */
+        }
+
+        /* Raridades CSS */
+        .common { background-color: #757575; color: white; }
+        .rare { background-color: #29b6f6; color: white; }
+        .epic { background-color: #ab47bc; color: white; }
+        .legendary { background-color: #ffb300; color: #424242; }
+        .mythic { background-color: #ff0000; color: white; }
+        .god { background-color: #43a047; color: white; }
+        .secret { background-color: #000000; color: #ffeb3b; border: 2px dashed #ffeb3b; }
+        .og { background-color: #6a1b9a; color: #ffeb3b; border: 2px solid #ffeb3b; }
+        .galactic { background: radial-gradient(circle, #f3e5f5 0%, #ba68c8 100%); color: #424242; border: 2px solid #9c27b0; }
+        .cosmic { background: radial-gradient(circle, #80deea 0%, #00acc1 100%); color: #1e88e5; border: 2px solid #0097a7; }
+        .transcendental { background: linear-gradient(45deg, #FF6F61, #C724B1, #5D3FD3); color: #fff; border: 2px solid #fff; }
+        .paradoxal { background: linear-gradient(135deg, #00C9FF, #92FE9D); color: #000; border: 2px solid #000; }
+        .eternal { background: radial-gradient(circle, #FFD700 0%, #FFA500 100%); color: #424242; border: 2px solid #FFD700; box-shadow: 0 0 10px 5px #FFD700; }
+        .divine { background: radial-gradient(circle, #E0B0FF 0%, #8A2BE2 100%); color: #fff; border: 2px solid #E0B0FF; box-shadow: 0 0 10px 5px #E0B0FF; }
+        .cosmologic { background: radial-gradient(circle, #B2F0FF 0%, #4D8DFF 100%); color: #000; border: 2px solid #4D8DFF; }
+        .final { background: radial-gradient(circle, #FFE5E5 0%, #FFB2B2 100%); color: #000; border: 2px solid #FFB2B2; }
+        .mystic { background: radial-gradient(circle, #E6E6FA 0%, #DDA0DD 100%); color: #4B0082; border: 2px solid #8A2BE2; }
+        .immortal { background: linear-gradient(45deg, #FFD700, #FF4500); color: #000; border: 2px solid #FFD700; }
+        .absolute { background: linear-gradient(90deg, #000000, #FFFFFF, #000000); color: #FFF; border: 2px solid #FFF; }
+    </style>
+</head>
+<body>
+
+    <div id="game-area">
+        <div id="money-display">Dinheiro: $250</div>
+        <div id="event-message" style="display: none;">EVENTO ATIVO!</div>
+        <div id="admin-controls" style="display: none;">
+            <button id="admin-button">Ativar Evento</button>
+            <button id="duration-30">30s</button>
+            <button id="duration-60">60s</button>
+            <button id="duration-120">120s</button>
+        </div>
+        <div id="base-1" class="base" style="top: 50px; left: 50px;">
+            <div class="base-label">Sua Base</div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+        </div>
+        <div id="base-3" class="base" style="top: 325px; left: 50px;">
+            <div class="base-label">Base 3</div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+        </div>
+        <div id="base-5" class="base" style="bottom: 50px; left: 50px;">
+            <div class="base-label">Base 5</div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+        </div>
+
+        <div id="base-2" class="base" style="top: 50px; right: 50px;">
+            <div class="base-label">Base 2</div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+        </div>
+        <div id="base-4" class="base" style="top: 325px; right: 50px;">
+            <div class="base-label">Base 4</div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+        </div>
+        <div id="base-6" class="base" style="bottom: 50px; right: 50px;">
+            <div class="base-label">Base 6</div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+            <div class="base-row">
+                <div class="slot"></div>
+                <div class="slot"></div>
+                <div class="slot"></div>
+            </div>
+        </div>
+
+        <div id="conveyor-belt"></div> 
+    </div>
+
+    <script>
+        const socket = io();
+        const gameArea = document.getElementById('game-area');
+        const players = {};
+        const brainRots = {};
+        let myId;
+        let myPlayer;
+
+        const CONVEYOR_BELT_PROPS = {
+            x: gameArea.offsetWidth / 2 - 100 / 2, // Centraliza no mapa
+            y: gameArea.offsetHeight / 2 - 700 / 2, // Centraliza no mapa
+            width: 100,
+            height: 700
+        };
+
+        const BRAIN_ROT_TYPES = [
+            { name: 'Skibidi Toilet', rarity: 'Comum', price: 10, sellPrice: 5, generationRate: 0.1, class: 'common' },
+            { name: 'Sigma Face', rarity: 'Comum', price: 12, sellPrice: 6, generationRate: 0.12, class: 'common' },
+            { name: 'Cbum', rarity: 'Raro', price: 50, sellPrice: 25, generationRate: 0.5, class: 'rare' },
+            { name: 'Baby Gronk', rarity: 'Raro', price: 60, sellPrice: 30, generationRate: 0.6, class: 'rare' },
+            { name: 'NPC Streamer', rarity: 'Épico', price: 200, sellPrice: 100, generationRate: 2, class: 'epic' },
+            { name: 'The Weeknd', rarity: 'Épico', price: 250, sellPrice: 125, generationRate: 2.5, class: 'epic' },
+            { name: 'Bebê Dançando', rarity: 'Lendário', price: 1000, sellPrice: 500, generationRate: 10, class: 'legendary' },
+            { name: 'Gato Cansado', rarity: 'Lendário', price: 1200, sellPrice: 600, generationRate: 12, class: 'legendary' },
+            { name: 'Morte ao Vivo', rarity: 'Mítico', price: 2500, sellPrice: 1250, generationRate: 25, class: 'mythic' },
+            { name: 'Brain Rot God', rarity: 'Deus', price: 5000, sellPrice: 2500, generationRate: 50, class: 'god' },
+            { name: 'OG Meme', rarity: 'OG', price: 8000, sellPrice: 4000, generationRate: 80, class: 'og' },
+            { name: 'Brainrot Secreto', rarity: 'Secreto', price: 15000, sellPrice: 7500, generationRate: 150, class: 'secret' },
+            { name: 'Animação 3D do Minecraft', rarity: 'Galactic', price: 25000, sellPrice: 12500, generationRate: 250, class: 'galactic' },
+            { name: 'Sopa de Letrinhas', rarity: 'Galactic', price: 30000, sellPrice: 15000, generationRate: 300, class: 'galactic' },
+            { name: 'GigaChad', rarity: 'Cosmic', price: 50000, sellPrice: 25000, generationRate: 500, class: 'cosmic' },
+            { name: 'Meme do Mago', rarity: 'Cosmic', price: 60000, sellPrice: 30000, generationRate: 600, class: 'cosmic' },
+            { name: 'Dancinha do Tik Tok', rarity: 'Transcendental', price: 150000, sellPrice: 75000, generationRate: 1500, class: 'transcendental' },
+            { name: 'Morte do Jogo do Roblox', rarity: 'Transcendental', price: 180000, sellPrice: 90000, generationRate: 1800, class: 'transcendental' },
+            { name: 'Portal para Outra Dimensão', rarity: 'Paradoxal', price: 500000, sellPrice: 250000, generationRate: 5000, class: 'paradoxal' },
+            { name: 'O Começo de Tudo', rarity: 'Paradoxal', price: 750000, sellPrice: 375000, generationRate: 7500, class: 'paradoxal' },
+            { name: 'O Fim da Jornada', rarity: 'Eterno', price: 1500000, sellPrice: 750000, generationRate: 15000, class: 'eternal' },
+            { name: 'Eterno Retorno', rarity: 'Eterno', price: 2000000, sellPrice: 1000000, generationRate: 20000, class: 'eternal' },
+            { name: 'O Vazio do Universo', rarity: 'Divino', price: 5000000, sellPrice: 2500000, generationRate: 50000, class: 'divine' },
+            { name: 'A Essência da Existência', rarity: 'Divino', price: 10000000, sellPrice: 5000000, generationRate: 100000, class: 'divine' },
+            { name: 'O Guardião do Tempo', rarity: 'Místico', price: 25000000, sellPrice: 12500000, generationRate: 250000, class: 'mystic' },
+            { name: 'O Código da Realidade', rarity: 'Místico', price: 50000000, sellPrice: 25000000, generationRate: 500000, class: 'mystic' },
+            { name: 'A Lenda de Outro Mundo', rarity: 'Lendário', price: 100000000, sellPrice: 50000000, generationRate: 1000000, class: 'legendary-new' },
+            { name: 'O Deus Supremo', rarity: 'Lendário', price: 200000000, sellPrice: 100000000, generationRate: 2000000, class: 'legendary-new' },
+            { name: 'Fragmento do Imortal', rarity: 'Imortal', price: 500000000, sellPrice: 250000000, generationRate: 5000000, class: 'immortal' },
+            { name: 'O Sussurro do Caos', rarity: 'Imortal', price: 1000000000, sellPrice: 500000000, generationRate: 10000000, class: 'immortal' },
+            { name: 'A Ascensão Absoluta', rarity: 'Absoluto', price: 5000000000, sellPrice: 2500000000, generationRate: 50000000, class: 'absolute' },
+            { name: 'O Fim de Tudo', rarity: 'Absoluto', price: 10000000000, sellPrice: 5000000000, generationRate: 100000000, class: 'absolute' },
+            { name: 'Chuva de Metade', rarity: 'Cosmológico', price: 500000000000, sellPrice: 250000000000, generationRate: 500000000, class: 'cosmologic' },
+            { name: 'A Criança do Apocalipse', rarity: 'Cosmológico', price: 1000000000000, sellPrice: 500000000000, generationRate: 1000000000, class: 'cosmologic' },
+            { name: 'O Coração do Universo', rarity: 'Final', price: 50000000000000, sellPrice: 25000000000000, generationRate: 50000000000, class: 'final' },
+            { name: 'O Fim da História', rarity: 'Final', price: 100000000000000, sellPrice: 50000000000000, generationRate: 100000000000, class: 'final' },
+            { name: 'Dança do Fanum Tax', rarity: 'Comum', price: 15, sellPrice: 7, generationRate: 0.15, class: 'common' },
+            { name: 'Rizzler Supremo', rarity: 'Raro', price: 70, sellPrice: 35, generationRate: 0.7, class: 'rare' },
+            { name: 'Ohio Mode Activated', rarity: 'Épico', price: 300, sellPrice: 150, generationRate: 3, class: 'epic' },
+            { name: 'Skibidi Rizz', rarity: 'Lendário', price: 1500, sellPrice: 750, generationRate: 15, class: 'legendary' },
+            { name: 'Brainrot Overload', rarity: 'Mítico', price: 3000, sellPrice: 1500, generationRate: 30, class: 'mythic' },
+            { name: 'Sigma Male Grindset', rarity: 'Deus', price: 6000, sellPrice: 3000, generationRate: 60, class: 'god' },
+            { name: 'Fanum Tax Collector', rarity: 'OG', price: 10000, sellPrice: 5000, generationRate: 100, class: 'og' },
+            { name: 'Rizz God Emperor', rarity: 'Galactic', price: 35000, sellPrice: 17500, generationRate: 350, class: 'galactic' },
+            { name: 'Ohio Sigma King', rarity: 'Cosmic', price: 70000, sellPrice: 35000, generationRate: 700, class: 'cosmic' },
+            { name: 'Brainrot Apocalypse', rarity: 'Transcendental', price: 200000, sellPrice: 100000, generationRate: 2000, class: 'transcendental' },
+            { name: 'Infinite Rizz Loop', rarity: 'Paradoxal', price: 1000000, sellPrice: 500000, generationRate: 10000, class: 'paradoxal' },
+            { name: 'Sigma Rule #1', rarity: 'Eterno', price: 3000000, sellPrice: 1500000, generationRate: 30000, class: 'eternal' },
+            { name: 'Fanum Tax Empire', rarity: 'Divino', price: 15000000, sellPrice: 7500000, generationRate: 150000, class: 'divine' },
+            { name: 'Rizz Dimension', rarity: 'Místico', price: 30000000, sellPrice: 15000000, generationRate: 300000, class: 'mystic' },
+            { name: 'Ohio Overlord', rarity: 'Imortal', price: 1500000000, sellPrice: 750000000, generationRate: 15000000, class: 'immortal' },
+            { name: 'Brainrot Singularity', rarity: 'Absoluto', price: 10000000000000, sellPrice: 5000000000000, generationRate: 100000000000, class: 'absolute' }
+        ];
+
+        const keys = {};
+        let zoom = 1;
+        window.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+
+        const BASE_POSITIONS = {
+            'base-1': { x: 50 + 250/2, y: 50 + 150/2 },
+            'base-2': { x: 1200 - 50 - 250/2, y: 50 + 150/2 },
+            'base-3': { x: 50 + 250/2, y: 325 + 150/2 },
+            'base-4': { x: 1200 - 50 - 250/2, y: 325 + 150/2 },
+            'base-5': { x: 50 + 250/2, y: 800 - 50 - 150/2 },
+            'base-6': { x: 1200 - 50 - 250/2, y: 800 - 50 - 150/2 }
+        };
+
+        function gameLoop() {
+            if (myPlayer) {
+                let dx = 0;
+                let dy = 0;
+                const speed = 2;
+
+                if (keys['w'] || keys['W'] || keys['ArrowUp']) dy -= speed;
+                if (keys['s'] || keys['S'] || keys['ArrowDown']) dy += speed;
+                if (keys['a'] || keys['A'] || keys['ArrowLeft']) dx -= speed;
+                if (keys['d'] || keys['D'] || keys['ArrowRight']) dx += speed;
+
+                if (dx !== 0 || dy !== 0) {
+                    socket.emit('playerMove', { dx, dy });
+                }
+
+                // Camera zoom
+                let minDist = Infinity;
+                for (let baseId in BASE_POSITIONS) {
+                    const dist = Math.sqrt((myPlayer.x + 15 - BASE_POSITIONS[baseId].x) ** 2 + (myPlayer.y + 15 - BASE_POSITIONS[baseId].y) ** 2);
+                    if (dist < minDist) minDist = dist;
+                }
+                if (minDist < 100) {
+                    zoom = Math.max(1.5, 2 - minDist / 100);
+                } else {
+                    zoom = 1;
+                }
+                gameArea.style.transform = `scale(${zoom})`;
+                gameArea.style.transformOrigin = 'center';
+            }
+            requestAnimationFrame(gameLoop);
+        }
+
+        socket.on('connect', () => {
+            console.log('Conectado ao servidor!');
+            myId = socket.id;
+        });
+
+        socket.on('assignBase', (data) => {
+            const { baseId, playerId, baseNumber, isOwner } = data;
+            if (playerId === myId) {
+                const myBaseElement = document.getElementById(baseId);
+                myBaseElement.classList.add('my-base');
+                myBaseElement.querySelector('.base-label').textContent = "Sua Base";
+                // Show admin controls if owner
+                if (isOwner) {
+                    document.getElementById('admin-controls').style.display = 'flex';
+                }
+            }
+        });
+
+        socket.on('serverFull', (message) => {
+            alert(message);
+        });
+
+        socket.on('updateMoney', (serverPlayers) => {
+            if (serverPlayers[myId]) {
+                document.getElementById('money-display').textContent = `Dinheiro: $${Math.floor(serverPlayers[myId].money)}`;
+            }
+        });
+
+        let flashInterval;
+        socket.on('adminEvent', (data) => {
+            const eventMessage = document.getElementById('event-message');
+            if (data.active) {
+                // Show blinking message for 5 seconds only
+                eventMessage.style.display = 'block';
+                setTimeout(() => {
+                    eventMessage.style.display = 'none';
+                }, 5000); // Hide after 5 seconds
+
+                // Start colorful flashing effect for the full duration
+                const duration = data.duration || 30000;
+                const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ff8000', '#8000ff'];
+                let elapsed = 0;
+                let colorIndex = 0;
+                flashInterval = setInterval(() => {
+                    gameArea.style.backgroundColor = colors[colorIndex % colors.length];
+                    colorIndex++;
+                    elapsed += 200; // Change color every 200ms
+                    if (elapsed >= duration) {
+                        clearInterval(flashInterval);
+                        gameArea.style.backgroundColor = '#333';
+                    }
+                }, 200);
+                alert('EVENTO ADMIN ATIVADO! Rares aumentados por ' + (duration / 1000) + ' segundos!');
+            } else {
+                if (flashInterval) {
+                    clearInterval(flashInterval);
+                    gameArea.style.backgroundColor = '#333';
+                }
+                eventMessage.style.display = 'none';
+                alert('Evento Admin desativado.');
+            }
+        });
+
+        socket.on('pickupFailed', (message) => {
+            alert(message);
+        });
+
+        socket.on('updatePlayers', (serverPlayers) => {
+            for (let id in serverPlayers) {
+                if (!players[id]) {
+                    const playerDiv = document.createElement('div');
+                    playerDiv.classList.add('player');
+                    playerDiv.id = id;
+                    const playerName = document.createElement('span');
+                    playerName.classList.add('player-name');
+                    playerName.textContent = `Jogador ${Object.keys(players).length + 1}`;
+                    if (id === myId) {
+                        playerName.textContent = "Você";
+                        myPlayer = serverPlayers[id];
+                    }
+                    playerDiv.appendChild(playerName);
+                    gameArea.appendChild(playerDiv);
+                    players[id] = playerDiv;
+                }
+
+                const player = players[id];
+                player.style.left = `${serverPlayers[id].x}px`;
+                player.style.top = `${serverPlayers[id].y}px`;
+            }
+
+            for (let id in players) {
+                if (!serverPlayers[id]) {
+                    if (players[id]) {
+                        players[id].remove();
+                    }
+                    delete players[id];
+                }
+            }
+        });
+
+        socket.on('updateBrainRots', (serverBrainRots) => {
+            // Remove Brain Rots que não existem mais
+            for (let id in brainRots) {
+                if (!serverBrainRots[id]) {
+                    if (brainRots[id]) {
+                        brainRots[id].remove();
+                    }
+                    delete brainRots[id];
+                }
+            }
+
+            // Adiciona ou atualiza Brain Rots
+            for (let id in serverBrainRots) {
+                const rotData = serverBrainRots[id];
+                if (!brainRots[id]) {
+                    const rotDiv = document.createElement('div');
+                    rotDiv.classList.add('brain-rot-item', rotData.class);
+                    rotDiv.id = `rot-${id}`;
+                    const rotType = BRAIN_ROT_TYPES.find(type => type.name === rotData.name);
+                    const price = rotType ? rotType.price : 0;
+                    rotDiv.innerHTML = `${rotData.name}<br>(${rotData.rarity})<br>$${price}`; // Exibe nome, raridade e preço
+                    gameArea.appendChild(rotDiv);
+                    brainRots[id] = rotDiv;
+
+                    rotDiv.addEventListener('click', () => {
+                        socket.emit('pickUpBrainRot', { rotId: id });
+                    });
+                }
+                const rotDiv = brainRots[id];
+                // Posiciona o Brain Rot corretamente no game area
+                rotDiv.style.left = `${rotData.x}px`;
+                rotDiv.style.top = `${rotData.y}px`;
+            }
+        });
+
+        socket.on('updateInventories', (serverPlayers) => {
+            // Clear all base slots
+            for (let i = 1; i <= 6; i++) {
+                const base = document.getElementById(`base-${i}`);
+                const slots = base.querySelectorAll('.slot');
+                slots.forEach(slot => {
+                    slot.innerHTML = '';
+                    slot.className = 'slot';
+                });
+            }
+
+            // Populate slots with inventories
+            for (let playerId in serverPlayers) {
+                const player = serverPlayers[playerId];
+                const base = document.getElementById(player.baseId);
+                if (base) {
+                    const slots = base.querySelectorAll('.slot');
+                    player.inventory.forEach((rot, index) => {
+                        if (slots[index]) {
+                            let content = `${rot.name}<br>(${rot.rarity})`;
+                            if (playerId === myId) {
+                                // Add sell button for own base
+                                content += '<br><button class="sell-btn" data-rot-id="' + rot.id + '">Vender</button>';
+                            }
+                            slots[index].innerHTML = content;
+                            slots[index].classList.add(rot.class);
+
+                            // Add sell button event listener
+                            if (playerId === myId) {
+                                const sellBtn = slots[index].querySelector('.sell-btn');
+                                if (sellBtn) {
+                                    sellBtn.addEventListener('click', () => {
+                                        sellRot(rot.id);
+                                    });
+                                }
+                            }
+
+                            if (playerId !== myId) {
+                                // Allow stealing from other bases
+                                slots[index].addEventListener('click', () => {
+                                    socket.emit('stealBrainRot', { targetPlayerId: playerId, rotId: rot.id });
+                                    alert(`Tentando roubar ${rot.name}!`);
+                                });
+                            }
+                        }
+                    });
+                }
+            }
+        });
+
+        function sellRot(rotId) {
+            socket.emit('sellBrainRot', { rotId });
+        }
+
+        let selectedDuration = 30000; // Default 30s
+
+        document.getElementById('admin-button').addEventListener('click', () => {
+            socket.emit('triggerAdminEvent', { duration: selectedDuration });
+        });
+
+        document.getElementById('duration-30').addEventListener('click', () => {
+            selectedDuration = 30000;
+            alert('Duração definida para 30 segundos');
+        });
+
+        document.getElementById('duration-60').addEventListener('click', () => {
+            selectedDuration = 60000;
+            alert('Duração definida para 60 segundos');
+        });
+
+        document.getElementById('duration-120').addEventListener('click', () => {
+            selectedDuration = 120000;
+            alert('Duração definida para 120 segundos');
+        });
+
+        gameLoop();
+    </script>
+
+</body>
+</html>
