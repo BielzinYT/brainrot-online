@@ -181,8 +181,8 @@ function spawnBrainRot() {
     };
 }
 
-function spawnBots() {
-    const botCount = 5; // Spawn 5 bots
+function spawnAIBots() {
+    const botCount = 6; // Spawn 6 bots for AI mode
     for (let i = 0; i < botCount; i++) {
         if (availableBases.length === 0) break;
 
@@ -194,7 +194,7 @@ function spawnBots() {
             x: mapWidth / 4,
             y: mapHeight / 2,
             id: botId,
-            username: `Bot ${baseNumber}`,
+            username: `IA ${baseNumber}`,
             baseId: baseId,
             baseNumber: baseNumber,
             inventory: [],
@@ -244,8 +244,8 @@ function updateBotBehavior(bot) {
         const dy = closestRot.y - bot.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist > 5) {
-            bot.x += (dx / dist) * 3; // Bot speed
-            bot.y += (dy / dist) * 3;
+            bot.x += (dx / dist) * 5; // Increased bot speed
+            bot.y += (dy / dist) * 5;
         } else {
             // Pick up the brainrot
             const rotType = BRAIN_ROT_TYPES.find(type => type.name === closestRot.name);
@@ -280,16 +280,24 @@ function updateBotBehavior(bot) {
                 }
             }
         } else {
-            // Random movement
+            // More active random movement
             const directions = [
-                { dx: 3, dy: 0 },   // Right
-                { dx: -3, dy: 0 },  // Left
-                { dx: 0, dy: 3 },   // Down
-                { dx: 0, dy: -3 },  // Up
-                { dx: 2, dy: 2 },   // Diagonal
-                { dx: -2, dy: 2 },
-                { dx: 2, dy: -2 },
-                { dx: -2, dy: -2 }
+                { dx: 5, dy: 0 },   // Right
+                { dx: -5, dy: 0 },  // Left
+                { dx: 0, dy: 5 },   // Down
+                { dx: 0, dy: -5 },  // Up
+                { dx: 4, dy: 4 },   // Diagonal
+                { dx: -4, dy: 4 },
+                { dx: 4, dy: -4 },
+                { dx: -4, dy: -4 },
+                { dx: 3, dy: 1 },   // Mixed directions
+                { dx: -3, dy: 1 },
+                { dx: 3, dy: -1 },
+                { dx: -3, dy: -1 },
+                { dx: 1, dy: 3 },
+                { dx: -1, dy: 3 },
+                { dx: 1, dy: -3 },
+                { dx: -1, dy: -3 }
             ];
             const dir = directions[Math.floor(Math.random() * directions.length)];
             bot.x += dir.dx;
@@ -332,7 +340,7 @@ setInterval(() => {
             updateBotBehavior(bot);
         }
     }
-}, 2000); // Every 2 seconds
+}, 1000); // Every 1 second for more active movement
 
 // Loop de atualização do servidor
 setInterval(() => {
@@ -384,9 +392,10 @@ io.on('connection', (socket) => {
 
         // Handle different game modes
         if (mode === 'solo') {
-            // Solo mode: only 1 player allowed
-            if (Object.keys(players).length > 0) {
-                socket.emit('serverFull', 'Modo Solo: Apenas 1 jogador permitido!');
+            // Solo mode: only 1 human player allowed, no bots
+            const humanPlayers = Object.keys(players).filter(id => !players[id].isBot);
+            if (humanPlayers.length > 0) {
+                socket.emit('serverFull', 'Modo Solo: Apenas 1 jogador humano permitido!');
                 socket.disconnect();
                 return;
             }
@@ -398,12 +407,11 @@ io.on('connection', (socket) => {
                 return;
             }
         } else if (mode === 'ai') {
-            // AI mode: player + bots
-            if (availableBases.length === 0) {
-                socket.emit('serverFull', 'Servidor cheio! Máximo 6 jogadores.');
-                socket.disconnect();
-                return;
-            }
+            // AI mode: only bots, human is spectator
+            // Don't add human player to players, just let them watch
+            socket.emit('spectatorMode', true);
+            spawnAIBots();
+            return;
         }
 
         // Set owner if first player
@@ -452,11 +460,6 @@ io.on('connection', (socket) => {
         }, 100);
 
         socket.broadcast.emit('updatePlayers', players);
-
-        // If AI mode, spawn bots after player joins
-        if (mode === 'ai') {
-            spawnBots();
-        }
     });
 
     socket.on('playerMove', (data) => {
