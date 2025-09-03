@@ -298,6 +298,76 @@
             transform: scale(1.05);
         }
 
+        /* Tooltip system */
+        .tooltip {
+            position: relative;
+            display: inline-block;
+        }
+
+        .tooltip .tooltip-text {
+            visibility: hidden;
+            width: 200px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 8px;
+            position: absolute;
+            z-index: 1001;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 12px;
+            border: 1px solid #555;
+        }
+
+        .tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        .tooltip .tooltip-text::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #333 transparent transparent transparent;
+        }
+
+        /* Notification system */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 1002;
+            transform: translateX(400px);
+            transition: transform 0.3s ease-out;
+            max-width: 300px;
+            font-size: 14px;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        .notification.error {
+            background: linear-gradient(135deg, #f44336, #d32f2f);
+        }
+
+        .notification.warning {
+            background: linear-gradient(135deg, #ff9800, #f57c00);
+        }
+
         .capacity-btn {
             background-color: #4CAF50;
         }
@@ -586,8 +656,14 @@
             <div class="base-label">Sua Base</div>
             <button id="lock-base-1" class="lock-btn" style="display: none;">Bloquear Base (60s)</button>
             <div class="upgrade-section" style="display: flex; gap: 5px; margin-bottom: 5px;">
-                <button id="upgrade-capacity-1" class="upgrade-btn capacity-btn" title="Aumentar Capacidade">Cap+</button>
-                <button id="upgrade-generation-1" class="upgrade-btn generation-btn" title="Aumentar Geração">Gen+</button>
+                <div class="tooltip">
+                    <button id="upgrade-capacity-1" class="upgrade-btn capacity-btn">Cap+</button>
+                    <span class="tooltip-text">Aumenta a capacidade do inventário<br>Custo: $500 → $1,500 → $4,000 → $10,000 → $25,000</span>
+                </div>
+                <div class="tooltip">
+                    <button id="upgrade-generation-1" class="upgrade-btn generation-btn">Gen+</button>
+                    <span class="tooltip-text">Aumenta a geração de dinheiro<br>Custo: $1,000 → $3,000 → $8,000 → $20,000 → $50,000</span>
+                </div>
             </div>
             <div class="base-row">
                 <div class="slot"></div>
@@ -1028,6 +1104,21 @@
         socket.on('connect', () => {
             console.log('Conectado ao servidor!');
             myId = socket.id;
+
+            // Start heartbeat system
+            setInterval(() => {
+                socket.emit('heartbeat', { clientTime: Date.now() });
+            }, 5000); // Send heartbeat every 5 seconds
+        });
+
+        socket.on('disconnect', (reason) => {
+            console.log('Desconectado do servidor:', reason);
+            showModal('Conexão perdida! Recarregue a página para reconectar.');
+        });
+
+        socket.on('reconnect', (attemptNumber) => {
+            console.log('Reconectado ao servidor após', attemptNumber, 'tentativas');
+            showNotification('Reconectado ao servidor!', 'success');
         });
 
 
@@ -1145,15 +1236,39 @@
         });
 
         socket.on('pickupFailed', (message) => {
-            showModal(message);
+            showModal(message || 'Falha ao coletar Brain Rot.');
         });
 
         socket.on('stealFailed', (message) => {
-            showModal(message);
+            showModal(message || 'Falha ao roubar Brain Rot.');
         });
 
         socket.on('sellFailed', (message) => {
-            showModal(message);
+            showModal(message || 'Falha ao vender Brain Rot.');
+        });
+
+        socket.on('moveRejected', (message) => {
+            showModal(message || 'Movimento rejeitado.');
+        });
+
+        socket.on('lockFailed', (message) => {
+            showModal(message || 'Falha ao bloquear base.');
+        });
+
+        socket.on('upgradeFailed', (message) => {
+            showModal(message || 'Falha no upgrade.');
+        });
+
+        socket.on('adminEventFailed', (message) => {
+            showModal(message || 'Falha no evento admin.');
+        });
+
+        socket.on('serverError', (message) => {
+            showModal('Erro do servidor: ' + (message || 'Erro desconhecido.'));
+        });
+
+        socket.on('serverFull', (message) => {
+            showModal(message || 'Servidor cheio.');
         });
 
         socket.on('upgradeSuccess', (data) => {
@@ -1164,7 +1279,7 @@
             } else {
                 message = `Geração aumentada para ${newValue}x!`;
             }
-            showModal(`Upgrade realizado! ${message}`);
+            showNotification(`Upgrade realizado! ${message}`, 'success');
 
             // Update money display
             document.getElementById('money-display').textContent = `Dinheiro: $${remainingMoney}`;
@@ -1209,55 +1324,87 @@
         });
 
         socket.on('updateBrainRots', (serverBrainRots) => {
-            // Remove Brain Rots que não existem mais
-            for (let id in brainRots) {
-                if (!serverBrainRots[id]) {
-                    if (brainRots[id]) {
-                        brainRotPool.release(brainRots[id]);
+            try {
+                // Validate server data
+                if (!serverBrainRots || typeof serverBrainRots !== 'object') {
+                    console.error('Invalid brainRots data received');
+                    return;
+                }
+
+                // Remove Brain Rots que não existem mais
+                for (let id in brainRots) {
+                    if (!serverBrainRots[id]) {
+                        if (brainRots[id]) {
+                            brainRotPool.release(brainRots[id]);
+                        }
+                        delete brainRots[id];
                     }
-                    delete brainRots[id];
                 }
-            }
 
-            // Adiciona ou atualiza Brain Rots
-            for (let id in serverBrainRots) {
-                const rotData = serverBrainRots[id];
-                if (!brainRots[id]) {
-                    const rotDiv = brainRotPool.create();
-                    rotDiv.className = `brain-rot-item ${rotData.class}`;
-                    rotDiv.id = `rot-${id}`;
-                    rotDiv.style.display = 'block';
+                // Adiciona ou atualiza Brain Rots
+                for (let id in serverBrainRots) {
+                    const rotData = serverBrainRots[id];
 
-                    const rotType = BRAIN_ROT_TYPES.find(type => type.name === rotData.name);
-                    const price = rotType ? rotType.price : 0;
-                    rotDiv.innerHTML = `${rotData.name}<br>(${rotData.rarity})<br><span style="color: #ffeb3b; font-weight: bold;">$${price}</span>`; // Exibe nome, raridade e preço em destaque
-                    brainRots[id] = rotDiv;
+                    // Validate rot data
+                    if (!rotData || typeof rotData !== 'object' ||
+                        typeof rotData.x !== 'number' || typeof rotData.y !== 'number') {
+                        console.error('Invalid rot data for id:', id);
+                        continue;
+                    }
 
-                    // Create spawn particles
-                    particleSystem.createParticle(rotData.x + 20, rotData.y + 20, 'spawn', 8);
+                    if (!brainRots[id]) {
+                        const rotDiv = brainRotPool.create();
+                        if (!rotDiv) {
+                            console.error('Failed to create Brain Rot element');
+                            continue;
+                        }
 
-                    rotDiv.addEventListener('click', () => {
-                        // Add collecting animation
-                        rotDiv.classList.add('collecting');
+                        rotDiv.className = `brain-rot-item ${rotData.class || 'common'}`;
+                        rotDiv.id = `rot-${id}`;
+                        rotDiv.style.display = 'block';
 
-                        socket.emit('pickUpBrainRot', { rotId: id });
-                        soundManager.play(soundManager.pickupSound);
-                        // Create collect particles
-                        particleSystem.createParticle(rotData.x + 20, rotData.y + 20, 'collect', 6);
+                        const rotType = BRAIN_ROT_TYPES.find(type => type.name === rotData.name);
+                        const price = rotType ? rotType.price : 0;
+                        const rarity = rotData.rarity || 'Comum';
+                        const name = rotData.name || 'Unknown';
 
-                        // Remove the element after animation
-                        setTimeout(() => {
-                            if (rotDiv.parentNode) {
-                                brainRotPool.release(rotDiv);
-                                delete brainRots[id];
-                            }
-                        }, 300);
-                    });
+                        rotDiv.innerHTML = `${name}<br>(${rarity})<br><span style="color: #ffeb3b; font-weight: bold;">$${price}</span>`;
+                        brainRots[id] = rotDiv;
+
+                        // Create spawn particles
+                        particleSystem.createParticle(rotData.x + 20, rotData.y + 20, 'spawn', 8);
+
+                        rotDiv.addEventListener('click', () => {
+                            // Prevent multiple clicks
+                            if (rotDiv.classList.contains('collecting')) return;
+
+                            // Add collecting animation
+                            rotDiv.classList.add('collecting');
+
+                            socket.emit('pickUpBrainRot', { rotId: id });
+                            soundManager.play(soundManager.pickupSound);
+                            // Create collect particles
+                            particleSystem.createParticle(rotData.x + 20, rotData.y + 20, 'collect', 6);
+
+                            // Remove the element after animation
+                            setTimeout(() => {
+                                if (rotDiv && rotDiv.parentNode) {
+                                    brainRotPool.release(rotDiv);
+                                    delete brainRots[id];
+                                }
+                            }, 300);
+                        });
+                    }
+
+                    const rotDiv = brainRots[id];
+                    if (rotDiv) {
+                        // Posiciona o Brain Rot corretamente no game area
+                        rotDiv.style.left = `${rotData.x}px`;
+                        rotDiv.style.top = `${rotData.y}px`;
+                    }
                 }
-                const rotDiv = brainRots[id];
-                // Posiciona o Brain Rot corretamente no game area
-                rotDiv.style.left = `${rotData.x}px`;
-                rotDiv.style.top = `${rotData.y}px`;
+            } catch (error) {
+                console.error('Error in updateBrainRots:', error);
             }
         });
 
@@ -1346,9 +1493,64 @@
             }
         }
 
+        // Notification system
+        let notificationQueue = [];
+        let isNotificationShowing = false;
+
+        function showNotification(message, type = 'success', duration = 3000) {
+            notificationQueue.push({ message, type, duration });
+
+            if (!isNotificationShowing) {
+                showNextNotification();
+            }
+        }
+
+        function showNextNotification() {
+            if (notificationQueue.length === 0) {
+                isNotificationShowing = false;
+                return;
+            }
+
+            isNotificationShowing = true;
+            const { message, type, duration } = notificationQueue.shift();
+
+            // Remove existing notification
+            const existingNotification = document.querySelector('.notification');
+            if (existingNotification) {
+                existingNotification.remove();
+            }
+
+            // Create new notification
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            // Trigger animation
+            setTimeout(() => notification.classList.add('show'), 10);
+
+            // Auto-hide
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.remove();
+                    }
+                    showNextNotification();
+                }, 300);
+            }, duration);
+        }
+
         // Modal functions
-        function showModal(message) {
-            document.getElementById('modal-message').textContent = message;
+        function showModal(message, type = 'info') {
+            const modalMessage = document.getElementById('modal-message');
+            const modal = document.getElementById('modal');
+
+            modalMessage.textContent = message;
+
+            // Update modal styling based on type
+            modal.className = `modal ${type}`;
+
             document.getElementById('modal-overlay').style.display = 'flex';
         }
 
@@ -1357,6 +1559,18 @@
         }
 
         document.getElementById('modal-close').addEventListener('click', hideModal);
+
+        // Mobile compatibility
+        function isMobile() {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                   window.innerWidth <= 768;
+        }
+
+        // Touch event handling for mobile
+        if (isMobile()) {
+            document.addEventListener('touchstart', function() {}, { passive: true });
+            console.log('Mobile device detected, touch events enabled');
+        }
 
         let selectedDuration = 30000; // Default 30s
 
