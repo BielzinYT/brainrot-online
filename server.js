@@ -41,6 +41,18 @@ const BASE_POSITIONS = {
     'base-6': { x: mapWidth - 50 - 250/2, y: mapHeight - 50 - 150/2 }
 };
 
+// Base upgrade system
+const BASE_UPGRADES = {
+    capacity: {
+        levels: [6, 8, 10, 12, 15], // Max inventory slots
+        costs: [500, 1500, 4000, 10000, 25000]
+    },
+    generation: {
+        levels: [1.0, 1.25, 1.5, 2.0, 3.0], // Generation multiplier
+        costs: [1000, 3000, 8000, 20000, 50000]
+    }
+};
+
 const BRAIN_ROT_TYPES = [
     { name: 'Skibidi Toilet', rarity: 'Comum', price: 10, sellPrice: 5, generationRate: 0.1, class: 'common' },
     { name: 'Sigma Face', rarity: 'Comum', price: 12, sellPrice: 6, generationRate: 0.12, class: 'common' },
@@ -198,7 +210,10 @@ setInterval(() => {
                 totalGeneration += rotType.generationRate;
             }
         });
-        player.money += totalGeneration;
+
+        // Apply generation upgrade multiplier
+        const generationMultiplier = BASE_UPGRADES.generation.levels[player.upgrades.generation];
+        player.money += totalGeneration * generationMultiplier;
     }
     io.emit('updateMoney', players);
 }, 1000); // Every second
@@ -292,7 +307,11 @@ io.on('connection', (socket) => {
             baseLocked: false,
             baseLockTime: 0,
             lastMoveTime: Date.now(),
-            lastPosition: { x: mapWidth / 4, y: mapHeight / 2 }
+            lastPosition: { x: mapWidth / 4, y: mapHeight / 2 },
+            upgrades: {
+                capacity: 0, // Level 0 = 6 slots
+                generation: 0 // Level 0 = 1.0x generation
+            }
         };
 
         players[socket.id] = playerData;
@@ -370,7 +389,14 @@ io.on('connection', (socket) => {
         const rot = brainRots[data.rotId];
         if (rot && !rot.owner) {
             const rotType = BRAIN_ROT_TYPES.find(type => type.name === rot.name);
+            const maxCapacity = BASE_UPGRADES.capacity.levels[player.upgrades.capacity];
+
             if (rotType && player.money >= rotType.price) {
+                if (player.inventory.length >= maxCapacity) {
+                    socket.emit('pickupFailed', `Base cheia! Capacidade máxima: ${maxCapacity}`);
+                    return;
+                }
+
                 player.money -= rotType.price;
                 rot.owner = socket.id;
                 rot.targetBase = player.baseId;
@@ -460,6 +486,49 @@ io.on('connection', (socket) => {
                 }, duration);
             }
         }
+    });
+
+    socket.on('upgradeBase', (data) => {
+        const player = players[socket.id];
+        if (!player) return;
+
+        const { upgradeType } = data;
+        const currentLevel = player.upgrades[upgradeType];
+
+        // Validate input
+        if (!upgradeType || !['capacity', 'generation'].includes(upgradeType)) {
+            socket.emit('upgradeFailed', 'Tipo de upgrade inválido.');
+            return;
+        }
+
+        // Check if max level reached
+        if (currentLevel >= BASE_UPGRADES[upgradeType].levels.length - 1) {
+            socket.emit('upgradeFailed', 'Nível máximo alcançado!');
+            return;
+        }
+
+        const upgradeCost = BASE_UPGRADES[upgradeType].costs[currentLevel];
+
+        // Check if player has enough money
+        if (player.money < upgradeCost) {
+            socket.emit('upgradeFailed', 'Dinheiro insuficiente!');
+            return;
+        }
+
+        // Perform upgrade
+        player.money -= upgradeCost;
+        player.upgrades[upgradeType] = currentLevel + 1;
+
+        // Send success response with new level and remaining money
+        socket.emit('upgradeSuccess', {
+            upgradeType,
+            newLevel: player.upgrades[upgradeType],
+            newValue: BASE_UPGRADES[upgradeType].levels[player.upgrades[upgradeType]],
+            remainingMoney: player.money
+        });
+
+        // Update money for all clients
+        io.emit('updateMoney', players);
     });
 
     socket.on('disconnect', () => {
