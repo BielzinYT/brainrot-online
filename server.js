@@ -20,7 +20,6 @@ const mapHeight = 800;
 const availableBases = [1,2,3,4,5,6]; // Track available base numbers
 let adminEventActive = false;
 let ownerId = null; // Track the owner (first player)
-const bots = {}; // Store bot instances
 let gameMode = 'online'; // Default mode
 
 // Propriedades do Tapete Transportador (agora vertical)
@@ -181,137 +180,12 @@ function spawnBrainRot() {
     };
 }
 
-function spawnAIBots() {
-    const botCount = 6; // Spawn 6 bots for AI mode
-    for (let i = 0; i < botCount; i++) {
-        if (availableBases.length === 0) break;
-
-        const baseNumber = availableBases.shift();
-        const baseId = `base-${baseNumber}`;
-        const botId = `bot-${baseNumber}`;
-
-        const botData = {
-            x: mapWidth / 4,
-            y: mapHeight / 2,
-            id: botId,
-            username: `IA ${baseNumber}`,
-            baseId: baseId,
-            baseNumber: baseNumber,
-            inventory: [],
-            money: 250,
-            baseLocked: false,
-            baseLockTime: 0,
-            lastMoveTime: Date.now(),
-            lastPosition: { x: mapWidth / 4, y: mapHeight / 2 },
-            isBot: true
-        };
-
-        players[botId] = botData;
-        bots[botId] = botData;
-    }
-
-    // Send updated players to all clients
-    io.emit('updatePlayers', players);
-    io.emit('updateInventories', players);
-    io.emit('updateMoney', players);
-}
+// AI functions removed - AI mode eliminated
 
 // Spawna um Brain Rot a cada 1.5 segundos (ajustado para mais frequência)
 setInterval(spawnBrainRot, 1500);
 
-function updateBotBehavior(bot) {
-    // Find closest brainrot that bot can afford
-    let closestRot = null;
-    let closestDist = Infinity;
-
-    for (const rotId in brainRots) {
-        const rot = brainRots[rotId];
-        if (rot.owner) continue; // Already owned
-
-        const rotType = BRAIN_ROT_TYPES.find(type => type.name === rot.name);
-        if (!rotType || bot.money < rotType.price) continue; // Can't afford
-
-        const dist = Math.sqrt((bot.x - rot.x) ** 2 + (bot.y - rot.y) ** 2);
-        if (dist < closestDist) {
-            closestDist = dist;
-            closestRot = rot;
-        }
-    }
-
-    if (closestRot && closestDist < 100) { // Within pickup range
-        // Move towards brainrot
-        const dx = closestRot.x - bot.x;
-        const dy = closestRot.y - bot.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 5) {
-            bot.x += (dx / dist) * 5; // Increased bot speed
-            bot.y += (dy / dist) * 5;
-        } else {
-            // Pick up the brainrot
-            const rotType = BRAIN_ROT_TYPES.find(type => type.name === closestRot.name);
-            if (rotType && bot.money >= rotType.price && bot.inventory.length < 6) {
-                bot.money -= rotType.price;
-                closestRot.owner = bot.id;
-                closestRot.targetBase = bot.baseId;
-                bot.inventory.push({
-                    id: closestRot.id,
-                    name: closestRot.name,
-                    rarity: closestRot.rarity,
-                    class: closestRot.class
-                });
-                io.emit('updateBrainRots', brainRots);
-                io.emit('updateMoney', players);
-                io.emit('updateInventories', players);
-            }
-        }
-    } else {
-        // Random movement or steal attempt
-        if (Math.random() < 0.3) { // 30% chance to try stealing
-            // Find a random player to steal from
-            const playerIds = Object.keys(players).filter(id => id !== bot.id && !players[id].isBot);
-            if (playerIds.length > 0) {
-                const targetId = playerIds[Math.floor(Math.random() * playerIds.length)];
-                const target = players[targetId];
-                if (target && target.inventory.length > 0 && !target.baseLocked) {
-                    const rotIndex = Math.floor(Math.random() * target.inventory.length);
-                    const stolenRot = target.inventory.splice(rotIndex, 1)[0];
-                    bot.inventory.push(stolenRot);
-                    io.emit('updateInventories', players);
-                }
-            }
-        } else {
-            // More active random movement
-            const directions = [
-                { dx: 5, dy: 0 },   // Right
-                { dx: -5, dy: 0 },  // Left
-                { dx: 0, dy: 5 },   // Down
-                { dx: 0, dy: -5 },  // Up
-                { dx: 4, dy: 4 },   // Diagonal
-                { dx: -4, dy: 4 },
-                { dx: 4, dy: -4 },
-                { dx: -4, dy: -4 },
-                { dx: 3, dy: 1 },   // Mixed directions
-                { dx: -3, dy: 1 },
-                { dx: 3, dy: -1 },
-                { dx: -3, dy: -1 },
-                { dx: 1, dy: 3 },
-                { dx: -1, dy: 3 },
-                { dx: 1, dy: -3 },
-                { dx: -1, dy: -3 }
-            ];
-            const dir = directions[Math.floor(Math.random() * directions.length)];
-            bot.x += dir.dx;
-            bot.y += dir.dy;
-
-            // Keep within bounds
-            bot.x = Math.max(0, Math.min(mapWidth - 30, bot.x));
-            bot.y = Math.max(0, Math.min(mapHeight - 30, bot.y));
-        }
-    }
-
-    // Update bot position for clients
-    io.emit('updatePlayers', players);
-}
+// AI functions removed - AI mode eliminated
 
 // Money generation
 setInterval(() => {
@@ -329,18 +203,7 @@ setInterval(() => {
     io.emit('updateMoney', players);
 }, 1000); // Every second
 
-// Bot behavior
-setInterval(() => {
-    if (gameMode === 'ai') {
-        for (const botId in bots) {
-            const bot = bots[botId];
-            if (!bot) continue;
-
-            // Bot actions
-            updateBotBehavior(bot);
-        }
-    }
-}, 1000); // Every 1 second for more active movement
+// Bot behavior removed - AI mode eliminated
 
 // Loop de atualização do servidor
 setInterval(() => {
@@ -392,10 +255,9 @@ io.on('connection', (socket) => {
 
         // Handle different game modes
         if (mode === 'solo') {
-            // Solo mode: only 1 human player allowed, no bots
-            const humanPlayers = Object.keys(players).filter(id => !players[id].isBot);
-            if (humanPlayers.length > 0) {
-                socket.emit('serverFull', 'Modo Solo: Apenas 1 jogador humano permitido!');
+            // Solo mode: allow multiple solo players, each playing independently
+            if (availableBases.length === 0) {
+                socket.emit('serverFull', 'Servidor cheio! Máximo 6 jogadores.');
                 socket.disconnect();
                 return;
             }
@@ -406,12 +268,6 @@ io.on('connection', (socket) => {
                 socket.disconnect();
                 return;
             }
-        } else if (mode === 'ai') {
-            // AI mode: only bots, human is spectator
-            // Don't add human player to players, just let them watch
-            socket.emit('spectatorMode', true);
-            spawnAIBots();
-            return;
         }
 
         // Set owner if first player
@@ -622,10 +478,6 @@ io.on('connection', (socket) => {
             availableBases.push(baseNumber);
             availableBases.sort();
 
-            // Remove from bots if it's a bot
-            if (bots[socket.id]) {
-                delete bots[socket.id];
-            }
 
             delete players[socket.id];
         }
