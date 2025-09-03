@@ -60,6 +60,54 @@ const BASE_UPGRADES = {
     }
 };
 
+// Daily quests system
+const DAILY_QUESTS = [
+    { id: 'collect_10', name: 'Coletor Iniciante', description: 'Colete 10 Brain Rots', reward: 100, target: 10, type: 'collect' },
+    { id: 'collect_25', name: 'Coletor Experiente', description: 'Colete 25 Brain Rots', reward: 250, target: 25, type: 'collect' },
+    { id: 'sell_5', name: 'Vendedor', description: 'Venda 5 Brain Rots', reward: 150, target: 5, type: 'sell' },
+    { id: 'steal_3', name: 'Ladrão Ardiloso', description: 'Roube 3 Brain Rots', reward: 200, target: 3, type: 'steal' },
+    { id: 'upgrade_1', name: 'Construtor', description: 'Faça 1 upgrade na base', reward: 300, target: 1, type: 'upgrade' },
+    { id: 'money_1000', name: 'Capitalista', description: 'Ganhe $1,000', reward: 500, target: 1000, type: 'money' }
+];
+
+function generateDailyQuests() {
+    // Return 3 random quests for the day
+    const shuffled = [...DAILY_QUESTS].sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, 3);
+}
+
+function checkQuestCompletion(player, actionType, currentValue) {
+    const completedQuests = [];
+
+    player.quests.daily.forEach(quest => {
+        if (quest.type === actionType && !player.quests.completed.includes(quest.id)) {
+            if (currentValue >= quest.target) {
+                // Quest completed!
+                player.quests.completed.push(quest.id);
+                player.money += quest.reward;
+                player.stats.totalMoneyEarned += quest.reward;
+                completedQuests.push(quest);
+
+                console.log(`Player ${player.username} completed quest: ${quest.name} (+$${quest.reward})`);
+            }
+        }
+    });
+
+    // Notify player of completed quests
+    if (completedQuests.length > 0) {
+        const playerSocket = io.sockets.sockets.get(player.id);
+        if (playerSocket) {
+            completedQuests.forEach(quest => {
+                playerSocket.emit('questCompleted', {
+                    quest: quest,
+                    reward: quest.reward,
+                    newMoney: player.money
+                });
+            });
+        }
+    }
+}
+
 const BRAIN_ROT_TYPES = [
     { name: 'Skibidi Toilet', rarity: 'Comum', price: 10, sellPrice: 5, generationRate: 0.1, class: 'common' },
     { name: 'Sigma Face', rarity: 'Comum', price: 12, sellPrice: 6, generationRate: 0.12, class: 'common' },
@@ -233,7 +281,15 @@ setInterval(() => {
 
             // Apply generation upgrade multiplier
             const generationMultiplier = BASE_UPGRADES.generation.levels[player.upgrades.generation];
-            player.money += totalGeneration * generationMultiplier;
+            const moneyEarned = totalGeneration * generationMultiplier;
+            player.money += moneyEarned;
+    
+            // Update quest progress for money earned
+            player.quests.progress.money += moneyEarned;
+            player.stats.totalMoneyEarned += moneyEarned;
+    
+            // Check for money quest completion
+            checkQuestCompletion(player, 'money', player.quests.progress.money);
         }
 
         // Clean up inactive players
@@ -448,7 +504,26 @@ io.on('connection', (socket) => {
                     capacity: 0, // Level 0 = 6 slots
                     generation: 0 // Level 0 = 1.0x generation
                 },
-                connectedAt: Date.now()
+                connectedAt: Date.now(),
+                quests: {
+                    daily: generateDailyQuests(),
+                    progress: {
+                        collect: 0,
+                        sell: 0,
+                        steal: 0,
+                        upgrade: 0,
+                        money: 0
+                    },
+                    completed: [],
+                    lastReset: new Date().toDateString()
+                },
+                stats: {
+                    totalCollected: 0,
+                    totalSold: 0,
+                    totalStolen: 0,
+                    totalMoneyEarned: 0,
+                    playTime: 0
+                }
             };
 
             players[socket.id] = playerData;
@@ -593,6 +668,13 @@ io.on('connection', (socket) => {
             rot.targetBase = player.baseId;
             rot.lastUpdate = Date.now();
 
+            // Update quest progress
+            player.quests.progress.collect++;
+            player.stats.totalCollected++;
+
+            // Check for quest completion
+            checkQuestCompletion(player, 'collect', player.quests.progress.collect);
+
             // Broadcast updates
             io.emit('updateBrainRots', brainRots);
             io.emit('updateMoney', players);
@@ -654,6 +736,13 @@ io.on('connection', (socket) => {
             // Perform steal
             const stolenRot = target.inventory.splice(rotIndex, 1)[0];
             thief.inventory.push(stolenRot);
+
+            // Update quest progress
+            thief.quests.progress.steal++;
+            thief.stats.totalStolen++;
+
+            // Check for quest completion
+            checkQuestCompletion(thief, 'steal', thief.quests.progress.steal);
 
             // Broadcast inventory updates
             io.emit('updateInventories', players);
@@ -737,6 +826,13 @@ io.on('connection', (socket) => {
 
             // Add sell price to player money
             player.money += rotType.sellPrice;
+
+            // Update quest progress
+            player.quests.progress.sell++;
+            player.stats.totalSold++;
+
+            // Check for quest completion
+            checkQuestCompletion(player, 'sell', player.quests.progress.sell);
 
             // Broadcast updates
             io.emit('updateInventories', players);
@@ -873,6 +969,10 @@ io.on('connection', (socket) => {
                 return;
             }
 
+            // Update quest progress
+            player.quests.progress.upgrade++;
+            checkQuestCompletion(player, 'upgrade', player.quests.progress.upgrade);
+
             // Send success response with new level and remaining money
             socket.emit('upgradeSuccess', {
                 upgradeType,
@@ -889,6 +989,56 @@ io.on('connection', (socket) => {
         } catch (error) {
             console.error('Error in upgradeBase:', error);
             socket.emit('upgradeFailed', 'Erro interno no upgrade.');
+        }
+    });
+
+    socket.on('chatMessage', (data) => {
+        try {
+            const player = players[socket.id];
+            if (!player) {
+                socket.emit('chatError', 'Jogador não encontrado.');
+                return;
+            }
+
+            // Validate input
+            if (!data || !data.message || typeof data.message !== 'string') {
+                socket.emit('chatError', 'Mensagem inválida.');
+                return;
+            }
+
+            const message = data.message.trim();
+
+            // Validate message length
+            if (message.length === 0 || message.length > 100) {
+                socket.emit('chatError', 'Mensagem deve ter entre 1 e 100 caracteres.');
+                return;
+            }
+
+            // Check for spam (simple rate limiting)
+            const now = Date.now();
+            if (!player.lastChatTime) player.lastChatTime = 0;
+
+            if (now - player.lastChatTime < 1000) { // 1 second cooldown
+                socket.emit('chatError', 'Aguarde um momento antes de enviar outra mensagem.');
+                return;
+            }
+
+            player.lastChatTime = now;
+
+            // Broadcast message to all players
+            io.emit('chatMessage', {
+                type: 'player',
+                playerId: socket.id,
+                playerName: player.username,
+                message: message,
+                timestamp: now
+            });
+
+            console.log(`Chat: ${player.username}: ${message}`);
+
+        } catch (error) {
+            console.error('Error in chatMessage:', error);
+            socket.emit('chatError', 'Erro interno no chat.');
         }
     });
 
