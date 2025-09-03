@@ -522,7 +522,7 @@ p<!DOCTYPE html>
             if (myPlayer) {
                 let dx = 0;
                 let dy = 0;
-                const speed = 2;
+                const speed = 4; // Increased from 2 to 4 for faster movement
 
                 if (keys['w'] || keys['W'] || keys['ArrowUp']) dy -= speed;
                 if (keys['s'] || keys['S'] || keys['ArrowDown']) dy += speed;
@@ -572,6 +572,7 @@ p<!DOCTYPE html>
                 }
                 // Show restore notification if data was restored
                 if (dataRestored) {
+                    console.log('Data restored, waiting for inventory update...');
                     const notification = document.getElementById('restore-notification');
                     notification.style.display = 'block';
                     setTimeout(() => {
@@ -596,6 +597,7 @@ p<!DOCTYPE html>
         });
 
         socket.on('clearBaseBrainrots', (data) => {
+            console.log('Clearing brainrots from base:', data.baseId);
             const baseElement = document.getElementById(data.baseId);
             if (baseElement) {
                 const slots = baseElement.querySelectorAll('.slot');
@@ -716,7 +718,7 @@ p<!DOCTYPE html>
                     rotDiv.id = `rot-${id}`;
                     const rotType = BRAIN_ROT_TYPES.find(type => type.name === rotData.name);
                     const price = rotType ? rotType.price : 0;
-                    rotDiv.innerHTML = `${rotData.name}<br>(${rotData.rarity})<br>$${price}`; // Exibe nome, raridade e preço
+                    rotDiv.innerHTML = `${rotData.name}<br>(${rotData.rarity})<br><span style="color: #ffeb3b; font-weight: bold;">$${price}</span>`; // Exibe nome, raridade e preço em destaque
                     gameArea.appendChild(rotDiv);
                     brainRots[id] = rotDiv;
 
@@ -732,6 +734,11 @@ p<!DOCTYPE html>
         });
 
         socket.on('updateInventories', (serverPlayers) => {
+            console.log('updateInventories received:', Object.keys(serverPlayers).length, 'players');
+            if (serverPlayers[myId]) {
+                console.log('My inventory:', serverPlayers[myId].inventory.length, 'items');
+            }
+
             // Clear all base slots
             for (let i = 1; i <= 6; i++) {
                 const base = document.getElementById(`base-${i}`);
@@ -750,7 +757,11 @@ p<!DOCTYPE html>
                     const slots = base.querySelectorAll('.slot');
                     player.inventory.forEach((rot, index) => {
                         if (slots[index]) {
-                            let content = `${rot.name}<br>(${rot.rarity})`;
+                            // Find the brainrot type to get sell price
+                            const rotType = BRAIN_ROT_TYPES.find(type => type.name === rot.name);
+                            const sellPrice = rotType ? rotType.sellPrice : 0;
+
+                            let content = `${rot.name}<br>(${rot.rarity})<br><span style="color: #ffeb3b; font-weight: bold;">$${sellPrice}</span>`;
                             if (playerId === myId) {
                                 // Add sell button for own base
                                 content += '<br><button class="sell-btn" data-rot-id="' + rot.id + '">Vender</button>';
