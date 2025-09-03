@@ -337,7 +337,6 @@
         <div style="display: flex; flex-direction: column; gap: 20px;">
             <button class="menu-button" data-mode="solo" style="width: 300px; padding: 20px; font-size: 24px; background: linear-gradient(45deg, #4CAF50, #45a049); color: white; border: none; border-radius: 10px; cursor: pointer; transition: all 0.3s;">Jogar Sozinho</button>
             <button class="menu-button" data-mode="online" style="width: 300px; padding: 20px; font-size: 24px; background: linear-gradient(45deg, #2196F3, #1976D2); color: white; border: none; border-radius: 10px; cursor: pointer; transition: all 0.3s;">Jogar Online</button>
-            <button class="menu-button" data-mode="ai" style="width: 300px; padding: 20px; font-size: 24px; background: linear-gradient(45deg, #FF9800, #F57C00); color: white; border: none; border-radius: 10px; cursor: pointer; transition: all 0.3s;">Jogar com IA</button>
         </div>
     </div>
 
@@ -491,17 +490,12 @@
             const brainRots = {};
             let myId;
             let myPlayer;
-            let isSpectator = false;
 
             // Send username and mode on connection
             socket.on('connect', () => {
                 console.log('Conectado ao servidor!');
                 myId = socket.id;
                 socket.emit('joinGame', { username, mode: gameMode });
-            });
-
-            socket.on('spectatorMode', (spectator) => {
-                isSpectator = spectator;
             });
 
         const CONVEYOR_BELT_PROPS = {
@@ -585,7 +579,7 @@
         };
 
         function gameLoop() {
-            if (myPlayer && !isSpectator) {
+            if (myPlayer) {
                 let dx = 0;
                 let dy = 0;
                 const speed = 6; // Increased to 6 for even faster movement
@@ -631,21 +625,6 @@
             myId = socket.id;
         });
 
-        socket.on('spectatorMode', (isSpectator) => {
-            if (isSpectator) {
-                // Hide all bases since spectator can't play
-                for (let i = 1; i <= 6; i++) {
-                    const base = document.getElementById(`base-${i}`);
-                    if (base) {
-                        base.style.display = 'none';
-                    }
-                }
-                // Hide admin controls
-                document.getElementById('admin-controls').style.display = 'none';
-                // Show spectator message
-                document.getElementById('money-display').textContent = "Modo Espectador - Assistindo IA";
-            }
-        });
 
         socket.on('assignBase', (data) => {
             const { baseId, playerId, baseNumber, isOwner, dataRestored } = data;
@@ -816,9 +795,7 @@
                     brainRots[id] = rotDiv;
 
                     rotDiv.addEventListener('click', () => {
-                        if (!isSpectator) {
-                            socket.emit('pickUpBrainRot', { rotId: id });
-                        }
+                        socket.emit('pickUpBrainRot', { rotId: id });
                     });
                 }
                 const rotDiv = brainRots[id];
@@ -874,7 +851,7 @@
                                 }
                             }
 
-                            if (playerId !== myId && !isSpectator) {
+                            if (playerId !== myId) {
                                 // Allow stealing from other bases
                                 slots[index].addEventListener('click', () => {
                                     socket.emit('stealBrainRot', { targetPlayerId: playerId, rotId: rot.id });
@@ -929,9 +906,7 @@
             const lockBtn = document.getElementById(`lock-base-${i}`);
             if (lockBtn) {
                 lockBtn.addEventListener('click', () => {
-                    if (!isSpectator) {
-                        socket.emit('lockBase');
-                    }
+                    socket.emit('lockBase');
                 });
             }
         }
