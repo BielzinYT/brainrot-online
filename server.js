@@ -20,6 +20,7 @@ const mapHeight = 800;
 const availableBases = [1,2,3,4,5,6]; // Track available base numbers
 let adminEventActive = false;
 let ownerId = null; // Track the owner (first player)
+const savedPlayers = {}; // Store player data for persistence
 
 // Propriedades do Tapete Transportador (agora vertical)
 const CONVEYOR_BELT_PROPS = {
@@ -257,29 +258,85 @@ io.on('connection', (socket) => {
     // Assign the lowest available base
     const baseNumber = availableBases.shift();
     const baseId = `base-${baseNumber}`;
+    const saveKey = `base-${baseNumber}`; // Use base as save key for persistence
 
-    players[socket.id] = {
-        x: mapWidth / 4, // Posição inicial para o jogador, ajustada
-        y: mapHeight / 2,
-        id: socket.id,
-        baseId: baseId,
-        baseNumber: baseNumber,
-        inventory: [], // Add inventory for brainrots
-        money: 250 // Starting money
-    };
+    // Check if there's saved data for this base
+    let playerData;
+    let dataRestored = false;
+    if (savedPlayers[saveKey]) {
+        // Restore saved player data
+        playerData = savedPlayers[saveKey];
+        playerData.id = socket.id; // Update with new socket ID
+        playerData.x = mapWidth / 4; // Reset position
+        playerData.y = mapHeight / 2;
+        playerData.lastMoveTime = Date.now();
+        playerData.lastPosition = { x: mapWidth / 4, y: mapHeight / 2 };
+        delete savedPlayers[saveKey]; // Remove from saved data
+        dataRestored = true;
+        console.log(`Player restored data for ${saveKey}`);
+    } else {
+        // Create new player
+        playerData = {
+            x: mapWidth / 4,
+            y: mapHeight / 2,
+            id: socket.id,
+            baseId: baseId,
+            baseNumber: baseNumber,
+            inventory: [],
+            money: 250,
+            baseLocked: false,
+            baseLockTime: 0,
+            lastMoveTime: Date.now(),
+            lastPosition: { x: mapWidth / 4, y: mapHeight / 2 }
+        };
+    }
+
+    players[socket.id] = playerData;
 
     socket.emit('updatePlayers', players);
     socket.emit('updateBrainRots', brainRots);
-    socket.emit('assignBase', { baseId, playerId: socket.id, baseNumber, isOwner: baseNumber === 1 });
+    socket.emit('assignBase', {
+        baseId,
+        playerId: socket.id,
+        baseNumber,
+        isOwner: baseNumber === 1,
+        dataRestored: dataRestored
+    });
 
     socket.broadcast.emit('updatePlayers', players);
 
     socket.on('playerMove', (data) => {
         const player = players[socket.id];
         if (player) {
-            player.x += data.dx;
-            player.y += data.dy;
+            // Validate input
+            if (typeof data.dx !== 'number' || typeof data.dy !== 'number' ||
+                Math.abs(data.dx) > 10 || Math.abs(data.dy) > 10) {
+                socket.emit('moveRejected', 'Movimento inválido detectado.');
+                return;
+            }
 
+            // Rate limiting (max 10 moves per second)
+            const now = Date.now();
+            if (now - player.lastMoveTime < 100) {
+                return; // Too fast, ignore
+            }
+            player.lastMoveTime = now;
+
+            // Speed validation
+            const newX = player.x + data.dx;
+            const newY = player.y + data.dy;
+            const distance = Math.sqrt((newX - player.lastPosition.x) ** 2 + (newY - player.lastPosition.y) ** 2);
+
+            if (distance > 5) { // Max 5 pixels per move
+                socket.emit('moveRejected', 'Movimento muito rápido detectado.');
+                return;
+            }
+
+            player.x = newX;
+            player.y = newY;
+            player.lastPosition = { x: newX, y: newY };
+
+            // Boundary validation
             player.x = Math.max(0, Math.min(mapWidth - 30, player.x));
             player.y = Math.max(0, Math.min(mapHeight - 30, player.y));
 
@@ -288,9 +345,17 @@ io.on('connection', (socket) => {
     });
 
     socket.on('pickUpBrainRot', (data) => {
-        const rot = brainRots[data.rotId];
         const player = players[socket.id];
-        if (rot && player && !rot.owner) {
+        if (!player) return;
+
+        // Validate input
+        if (!data.rotId || typeof data.rotId !== 'string') {
+            socket.emit('pickupFailed', 'Dados inválidos.');
+            return;
+        }
+
+        const rot = brainRots[data.rotId];
+        if (rot && !rot.owner) {
             const rotType = BRAIN_ROT_TYPES.find(type => type.name === rot.name);
             if (rotType && player.money >= rotType.price) {
                 player.money -= rotType.price;
@@ -299,18 +364,30 @@ io.on('connection', (socket) => {
                 io.emit('updateBrainRots', brainRots);
                 io.emit('updateMoney', players);
             } else {
-                // Not enough money, emit error
                 socket.emit('pickupFailed', 'Dinheiro insuficiente!');
             }
         }
     });
 
     socket.on('stealBrainRot', (data) => {
-        const { targetPlayerId, rotId } = data;
+        const player = players[socket.id];
+        if (!player) return;
+
+        // Validate input
+        if (!data.targetPlayerId || !data.rotId || typeof data.targetPlayerId !== 'string' || typeof data.rotId !== 'string') {
+            socket.emit('stealFailed', 'Dados inválidos.');
+            return;
+        }
+
         const thief = players[socket.id];
-        const target = players[targetPlayerId];
+        const target = players[data.targetPlayerId];
         if (thief && target) {
-            const rotIndex = target.inventory.findIndex(rot => rot.id === rotId);
+            // Check if target base is locked
+            if (target.baseLocked && Date.now() < target.baseLockTime) {
+                socket.emit('stealFailed', 'Base bloqueada! Tente novamente mais tarde.');
+                return;
+            }
+            const rotIndex = target.inventory.findIndex(rot => rot.id === data.rotId);
             if (rotIndex !== -1) {
                 const stolenRot = target.inventory.splice(rotIndex, 1)[0];
                 thief.inventory.push(stolenRot);
@@ -319,20 +396,39 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('sellBrainRot', (data) => {
-        const { rotId } = data;
+    socket.on('lockBase', () => {
         const player = players[socket.id];
-        if (player) {
-            const rotIndex = player.inventory.findIndex(rot => rot.id === rotId);
-            if (rotIndex !== -1) {
-                const soldRot = player.inventory.splice(rotIndex, 1)[0];
-                const rotType = BRAIN_ROT_TYPES.find(type => type.name === soldRot.name);
-                if (rotType) {
-                    player.money += rotType.sellPrice;
-                }
-                io.emit('updateInventories', players);
-                io.emit('updateMoney', players);
+        if (player && !player.baseLocked) {
+            player.baseLocked = true;
+            player.baseLockTime = Date.now() + 60000; // 60 seconds
+            io.emit('updateBaseLocks', players);
+            // Auto-unlock after 60 seconds
+            setTimeout(() => {
+                player.baseLocked = false;
+                io.emit('updateBaseLocks', players);
+            }, 60000);
+        }
+    });
+
+    socket.on('sellBrainRot', (data) => {
+        const player = players[socket.id];
+        if (!player) return;
+
+        // Validate input
+        if (!data.rotId || typeof data.rotId !== 'string') {
+            socket.emit('sellFailed', 'Dados inválidos.');
+            return;
+        }
+
+        const rotIndex = player.inventory.findIndex(rot => rot.id === data.rotId);
+        if (rotIndex !== -1) {
+            const soldRot = player.inventory.splice(rotIndex, 1)[0];
+            const rotType = BRAIN_ROT_TYPES.find(type => type.name === soldRot.name);
+            if (rotType) {
+                player.money += rotType.sellPrice;
             }
+            io.emit('updateInventories', players);
+            io.emit('updateMoney', players);
         }
     });
 
@@ -356,10 +452,29 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('Um jogador se desconectou:', socket.id);
         if (players[socket.id]) {
-            const baseNumber = players[socket.id].baseNumber;
+            const player = players[socket.id];
+            const baseNumber = player.baseNumber;
+            const saveKey = `base-${baseNumber}`;
+
+            // Save player data for persistence
+            savedPlayers[saveKey] = {
+                baseId: player.baseId,
+                baseNumber: player.baseNumber,
+                inventory: player.inventory,
+                money: player.money,
+                baseLocked: false, // Reset lock on disconnect
+                baseLockTime: 0
+            };
+
+            // Clear brainrots from base visually
+            io.emit('clearBaseBrainrots', { baseId: player.baseId });
+
+            // Make base available again
             availableBases.push(baseNumber);
-            availableBases.sort(); // Keep sorted
+            availableBases.sort();
+
             delete players[socket.id];
+            console.log(`Player data saved for ${saveKey}`);
         }
         io.emit('updatePlayers', players);
     });
