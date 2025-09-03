@@ -38,6 +38,12 @@
             font-size: 18px;
             font-weight: bold;
             z-index: 200;
+            transition: all 0.3s ease-out;
+        }
+
+        #money-display.updated {
+            transform: scale(1.1);
+            text-shadow: 0 0 10px #ffeb3b;
         }
 
         #event-message {
@@ -165,6 +171,8 @@
             border: 2px solid #2c2c2c;
             box-shadow: 0 0 10px rgba(255, 235, 59, 0.5);
             z-index: 100;
+            transition: all 0.1s ease-out;
+            transform: translate(-50%, -50%);
         }
 
         .player-name {
@@ -266,6 +274,46 @@
             font-weight: bold;
         }
 
+        .upgrade-section {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 5px;
+        }
+
+        .upgrade-btn {
+            width: 40px;
+            padding: 3px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 8px;
+            font-weight: bold;
+            transition: all 0.2s ease;
+        }
+
+        .upgrade-btn:hover {
+            background-color: #1976D2;
+            transform: scale(1.05);
+        }
+
+        .capacity-btn {
+            background-color: #4CAF50;
+        }
+
+        .capacity-btn:hover {
+            background-color: #45a049;
+        }
+
+        .generation-btn {
+            background-color: #FF9800;
+        }
+
+        .generation-btn:hover {
+            background-color: #e68900;
+        }
+
         #conveyor-belt {
             position: absolute;
             width: 100px; /* Largura do tapete */
@@ -278,6 +326,45 @@
             left: 50%;
             transform: translate(-50%, -50%);
             overflow: hidden;
+        }
+
+        /* Particle effects */
+        .particle {
+            position: absolute;
+            pointer-events: none;
+            z-index: 60;
+        }
+
+        .spawn-particle {
+            width: 4px;
+            height: 4px;
+            background-color: #ffeb3b;
+            border-radius: 50%;
+            box-shadow: 0 0 6px #ffeb3b;
+        }
+
+        .collect-particle {
+            width: 6px;
+            height: 6px;
+            background: radial-gradient(circle, #4CAF50, #45a049);
+            border-radius: 50%;
+            box-shadow: 0 0 8px #4CAF50;
+        }
+
+        .sell-particle {
+            width: 5px;
+            height: 5px;
+            background: radial-gradient(circle, #ffeb3b, #ffb300);
+            border-radius: 50%;
+            box-shadow: 0 0 10px #ffeb3b;
+        }
+
+        .steal-particle {
+            width: 8px;
+            height: 8px;
+            background: radial-gradient(circle, #ff4444, #cc3333);
+            border-radius: 50%;
+            box-shadow: 0 0 12px #ff4444;
         }
 
         .brain-rot-item {
@@ -295,6 +382,23 @@
             text-align: center;
             color: white;
             z-index: 50; /* Para aparecer abaixo do player, mas acima do tapete */
+            transition: all 0.15s ease-out;
+            transform: translate(-50%, -50%);
+        }
+
+        .brain-rot-item:hover {
+            transform: translate(-50%, -50%) scale(1.1);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.7);
+        }
+
+        .brain-rot-item.collecting {
+            animation: collectPulse 0.3s ease-out;
+        }
+
+        @keyframes collectPulse {
+            0% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.2); }
+            100% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
         }
 
         /* Raridades CSS */
@@ -363,6 +467,10 @@
         <div id="base-1" class="base" style="top: 50px; left: 50px;">
             <div class="base-label">Sua Base</div>
             <button id="lock-base-1" class="lock-btn" style="display: none;">Bloquear Base (60s)</button>
+            <div class="upgrade-section" style="display: flex; gap: 5px; margin-bottom: 5px;">
+                <button id="upgrade-capacity-1" class="upgrade-btn capacity-btn" title="Aumentar Capacidade">Cap+</button>
+                <button id="upgrade-generation-1" class="upgrade-btn generation-btn" title="Aumentar Geração">Gen+</button>
+            </div>
             <div class="base-row">
                 <div class="slot"></div>
                 <div class="slot"></div>
@@ -446,7 +554,33 @@
             </div>
         </div>
 
-        <div id="conveyor-belt"></div> 
+        <div id="conveyor-belt"></div>
+
+        <!-- Audio elements for sound effects -->
+        <audio id="bg-music" loop preload="auto">
+            <source src="sounds/background.mp3" type="audio/mpeg">
+            <source src="sounds/background.ogg" type="audio/ogg">
+        </audio>
+        <audio id="pickup-sound" preload="auto">
+            <source src="sounds/pickup.mp3" type="audio/mpeg">
+            <source src="sounds/pickup.ogg" type="audio/ogg">
+        </audio>
+        <audio id="sell-sound" preload="auto">
+            <source src="sounds/sell.mp3" type="audio/mpeg">
+            <source src="sounds/sell.ogg" type="audio/ogg">
+        </audio>
+        <audio id="steal-sound" preload="auto">
+            <source src="sounds/steal.mp3" type="audio/mpeg">
+            <source src="sounds/steal.ogg" type="audio/ogg">
+        </audio>
+        <audio id="event-sound" preload="auto">
+            <source src="sounds/event.mp3" type="audio/mpeg">
+            <source src="sounds/event.ogg" type="audio/ogg">
+        </audio>
+        <audio id="lock-sound" preload="auto">
+            <source src="sounds/lock.mp3" type="audio/mpeg">
+            <source src="sounds/lock.ogg" type="audio/ogg">
+        </audio>
     </div>
 
     <script>
@@ -490,6 +624,98 @@
             const brainRots = {};
             let myId;
             let myPlayer;
+
+            // Sound manager
+            const soundManager = {
+                bgMusic: document.getElementById('bg-music'),
+                pickupSound: document.getElementById('pickup-sound'),
+                sellSound: document.getElementById('sell-sound'),
+                stealSound: document.getElementById('steal-sound'),
+                eventSound: document.getElementById('event-sound'),
+                lockSound: document.getElementById('lock-sound'),
+
+                play: function(sound) {
+                    if (sound && sound.readyState >= 2) { // HAVE_CURRENT_DATA or higher
+                        sound.currentTime = 0;
+                        sound.play().catch(e => console.log('Audio play failed:', e));
+                    }
+                },
+
+                startBackgroundMusic: function() {
+                    this.play(this.bgMusic);
+                },
+
+                stopBackgroundMusic: function() {
+                    this.bgMusic.pause();
+                    this.bgMusic.currentTime = 0;
+                }
+            };
+
+            // Start background music when game starts
+            soundManager.startBackgroundMusic();
+
+            // Particle system
+            const particleSystem = {
+                particles: [],
+                gameArea: gameArea,
+
+                createParticle: function(x, y, type, count = 5) {
+                    for (let i = 0; i < count; i++) {
+                        const particle = document.createElement('div');
+                        particle.className = `particle ${type}-particle`;
+                        particle.style.left = `${x}px`;
+                        particle.style.top = `${y}px`;
+
+                        // Random velocity
+                        const angle = Math.random() * Math.PI * 2;
+                        const speed = Math.random() * 3 + 1;
+                        const vx = Math.cos(angle) * speed;
+                        const vy = Math.sin(angle) * speed;
+
+                        particle.vx = vx;
+                        particle.vy = vy;
+                        particle.life = 60; // 60 frames lifetime
+                        particle.gravity = 0.1;
+
+                        this.gameArea.appendChild(particle);
+                        this.particles.push(particle);
+                    }
+                },
+
+                update: function() {
+                    for (let i = this.particles.length - 1; i >= 0; i--) {
+                        const particle = this.particles[i];
+                        particle.life--;
+
+                        if (particle.life <= 0) {
+                            particle.remove();
+                            this.particles.splice(i, 1);
+                            continue;
+                        }
+
+                        // Update position
+                        const currentX = parseFloat(particle.style.left);
+                        const currentY = parseFloat(particle.style.top);
+
+                        particle.vx *= 0.98; // Friction
+                        particle.vy += particle.gravity; // Gravity
+
+                        particle.style.left = `${currentX + particle.vx}px`;
+                        particle.style.top = `${currentY + particle.vy}px`;
+
+                        // Fade out
+                        const opacity = particle.life / 60;
+                        particle.style.opacity = opacity;
+                    }
+                }
+            };
+
+            // Update particle system in game loop
+            const originalGameLoop = gameLoop;
+            gameLoop = function() {
+                particleSystem.update();
+                originalGameLoop();
+            };
 
             // Send username and mode on connection
             socket.on('connect', () => {
@@ -685,7 +911,19 @@
 
         socket.on('updateMoney', (serverPlayers) => {
             if (serverPlayers[myId]) {
-                document.getElementById('money-display').textContent = `Dinheiro: $${Math.floor(serverPlayers[myId].money)}`;
+                const moneyDisplay = document.getElementById('money-display');
+                const oldMoney = parseFloat(moneyDisplay.textContent.replace('Dinheiro: $', '')) || 0;
+                const newMoney = Math.floor(serverPlayers[myId].money);
+
+                moneyDisplay.textContent = `Dinheiro: $${newMoney}`;
+
+                // Add animation if money increased
+                if (newMoney > oldMoney) {
+                    moneyDisplay.classList.add('updated');
+                    setTimeout(() => {
+                        moneyDisplay.classList.remove('updated');
+                    }, 300);
+                }
             }
         });
 
@@ -693,6 +931,9 @@
         socket.on('adminEvent', (data) => {
             const eventMessage = document.getElementById('event-message');
             if (data.active) {
+                // Play event sound
+                soundManager.play(soundManager.eventSound);
+
                 // Show blinking message for 5 seconds only
                 eventMessage.style.display = 'block';
                 setTimeout(() => {
@@ -733,6 +974,24 @@
         });
 
         socket.on('sellFailed', (message) => {
+            showModal(message);
+        });
+
+        socket.on('upgradeSuccess', (data) => {
+            const { upgradeType, newLevel, newValue, remainingMoney } = data;
+            let message = '';
+            if (upgradeType === 'capacity') {
+                message = `Capacidade aumentada para ${newValue} slots!`;
+            } else {
+                message = `Geração aumentada para ${newValue}x!`;
+            }
+            showModal(`Upgrade realizado! ${message}`);
+
+            // Update money display
+            document.getElementById('money-display').textContent = `Dinheiro: $${remainingMoney}`;
+        });
+
+        socket.on('upgradeFailed', (message) => {
             showModal(message);
         });
 
@@ -794,8 +1053,24 @@
                     gameArea.appendChild(rotDiv);
                     brainRots[id] = rotDiv;
 
+                    // Create spawn particles
+                    particleSystem.createParticle(rotData.x + 20, rotData.y + 20, 'spawn', 8);
+
                     rotDiv.addEventListener('click', () => {
+                        // Add collecting animation
+                        rotDiv.classList.add('collecting');
+
                         socket.emit('pickUpBrainRot', { rotId: id });
+                        soundManager.play(soundManager.pickupSound);
+                        // Create collect particles
+                        particleSystem.createParticle(rotData.x + 20, rotData.y + 20, 'collect', 6);
+
+                        // Remove the element after animation
+                        setTimeout(() => {
+                            if (rotDiv.parentNode) {
+                                rotDiv.remove();
+                            }
+                        }, 300);
                     });
                 }
                 const rotDiv = brainRots[id];
@@ -856,6 +1131,17 @@
                                 slots[index].addEventListener('click', () => {
                                     socket.emit('stealBrainRot', { targetPlayerId: playerId, rotId: rot.id });
                                     showModal(`Tentando roubar ${rot.name}!`);
+                                    soundManager.play(soundManager.stealSound);
+
+                                    // Create steal particles at the target base
+                                    const targetBase = document.getElementById(player.baseId);
+                                    if (targetBase) {
+                                        const rect = targetBase.getBoundingClientRect();
+                                        const gameRect = gameArea.getBoundingClientRect();
+                                        const x = rect.left - gameRect.left + rect.width / 2;
+                                        const y = rect.top - gameRect.top + rect.height / 2;
+                                        particleSystem.createParticle(x, y, 'steal', 12);
+                                    }
                                 });
                             }
                         }
@@ -866,6 +1152,17 @@
 
         function sellRot(rotId) {
             socket.emit('sellBrainRot', { rotId });
+            soundManager.play(soundManager.sellSound);
+
+            // Create sell particles at the base position
+            const myBase = document.getElementById(`base-${myPlayer.baseNumber}`);
+            if (myBase) {
+                const rect = myBase.getBoundingClientRect();
+                const gameRect = gameArea.getBoundingClientRect();
+                const x = rect.left - gameRect.left + rect.width / 2;
+                const y = rect.top - gameRect.top + rect.height / 2;
+                particleSystem.createParticle(x, y, 'sell', 10);
+            }
         }
 
         // Modal functions
@@ -907,9 +1204,19 @@
             if (lockBtn) {
                 lockBtn.addEventListener('click', () => {
                     socket.emit('lockBase');
+                    soundManager.play(soundManager.lockSound);
                 });
             }
         }
+
+        // Upgrade functionality
+        const upgradeBtns = document.querySelectorAll('.upgrade-btn');
+        upgradeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const upgradeType = btn.classList.contains('capacity-btn') ? 'capacity' : 'generation';
+                socket.emit('upgradeBase', { upgradeType });
+            });
+        });
 
         gameLoop();
     }
