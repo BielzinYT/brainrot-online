@@ -20,7 +20,6 @@ const mapHeight = 800;
 const availableBases = [1,2,3,4,5,6]; // Track available base numbers
 let adminEventActive = false;
 let ownerId = null; // Track the owner (first player)
-const savedPlayers = {}; // Store player data for persistence
 
 // Propriedades do Tapete Transportador (agora vertical)
 const CONVEYOR_BELT_PROPS = {
@@ -258,38 +257,21 @@ io.on('connection', (socket) => {
     // Assign the lowest available base
     const baseNumber = availableBases.shift();
     const baseId = `base-${baseNumber}`;
-    const saveKey = `base-${baseNumber}`; // Use base as save key for persistence
 
-    // Check if there's saved data for this base
-    let playerData;
-    let dataRestored = false;
-    if (savedPlayers[saveKey]) {
-        // Restore saved player data
-        playerData = savedPlayers[saveKey];
-        playerData.id = socket.id; // Update with new socket ID
-        playerData.x = mapWidth / 4; // Reset position
-        playerData.y = mapHeight / 2;
-        playerData.lastMoveTime = Date.now();
-        playerData.lastPosition = { x: mapWidth / 4, y: mapHeight / 2 };
-        delete savedPlayers[saveKey]; // Remove from saved data
-        dataRestored = true;
-        console.log(`Player restored data for ${saveKey} - Inventory: ${playerData.inventory.length} items, Money: $${playerData.money}`);
-    } else {
-        // Create new player
-        playerData = {
-            x: mapWidth / 4,
-            y: mapHeight / 2,
-            id: socket.id,
-            baseId: baseId,
-            baseNumber: baseNumber,
-            inventory: [],
-            money: 250,
-            baseLocked: false,
-            baseLockTime: 0,
-            lastMoveTime: Date.now(),
-            lastPosition: { x: mapWidth / 4, y: mapHeight / 2 }
-        };
-    }
+    // Always create new player with initial state
+    const playerData = {
+        x: mapWidth / 4,
+        y: mapHeight / 2,
+        id: socket.id,
+        baseId: baseId,
+        baseNumber: baseNumber,
+        inventory: [],
+        money: 250,
+        baseLocked: false,
+        baseLockTime: 0,
+        lastMoveTime: Date.now(),
+        lastPosition: { x: mapWidth / 4, y: mapHeight / 2 }
+    };
 
     players[socket.id] = playerData;
 
@@ -300,7 +282,7 @@ io.on('connection', (socket) => {
         playerId: socket.id,
         baseNumber,
         isOwner: baseNumber === 1,
-        dataRestored: dataRestored
+        dataRestored: false
     });
 
     // Send inventory and money updates to all clients to show restored data
@@ -324,9 +306,9 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            // Rate limiting (max 30 moves per second for smoother movement)
+            // Rate limiting (max 50 moves per second for smoother movement)
             const now = Date.now();
-            if (now - player.lastMoveTime < 33) { // ~30 FPS
+            if (now - player.lastMoveTime < 20) { // ~50 FPS
                 return; // Too fast, ignore
             }
             player.lastMoveTime = now;
@@ -463,17 +445,6 @@ io.on('connection', (socket) => {
         if (players[socket.id]) {
             const player = players[socket.id];
             const baseNumber = player.baseNumber;
-            const saveKey = `base-${baseNumber}`;
-
-            // Save player data for persistence
-            savedPlayers[saveKey] = {
-                baseId: player.baseId,
-                baseNumber: player.baseNumber,
-                inventory: player.inventory,
-                money: player.money,
-                baseLocked: false, // Reset lock on disconnect
-                baseLockTime: 0
-            };
 
             // Clear brainrots from base visually for all clients
             io.emit('clearBaseBrainrots', { baseId: player.baseId });
@@ -486,7 +457,6 @@ io.on('connection', (socket) => {
             availableBases.sort();
 
             delete players[socket.id];
-            console.log(`Player data saved for ${saveKey}`);
         }
         io.emit('updatePlayers', players);
     });
