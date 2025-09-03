@@ -321,7 +321,27 @@
 </head>
 <body>
 
-    <div id="game-area">
+    <!-- Login Screen -->
+    <div id="login-screen" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+        <h1 style="font-size: 48px; margin-bottom: 40px;">Brain Rot Online</h1>
+        <div style="background: rgba(255, 255, 255, 0.1); padding: 40px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);">
+            <label for="username" style="font-size: 24px; margin-bottom: 20px; display: block;">Seu nome de usuário:</label>
+            <input type="text" id="username" maxlength="20" style="width: 300px; padding: 15px; font-size: 18px; border: none; border-radius: 8px; margin-bottom: 30px;" placeholder="Digite seu nome...">
+            <button id="enter-button" style="width: 320px; padding: 15px; font-size: 20px; background: linear-gradient(45deg, #ff6b6b, #ee5a24); color: white; border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s;">Entrar</button>
+        </div>
+    </div>
+
+    <!-- Menu Screen -->
+    <div id="menu-screen" style="display: none; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+        <h1 style="font-size: 48px; margin-bottom: 40px;">Escolha o Modo de Jogo</h1>
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+            <button class="menu-button" data-mode="solo" style="width: 300px; padding: 20px; font-size: 24px; background: linear-gradient(45deg, #4CAF50, #45a049); color: white; border: none; border-radius: 10px; cursor: pointer; transition: all 0.3s;">Jogar Sozinho</button>
+            <button class="menu-button" data-mode="online" style="width: 300px; padding: 20px; font-size: 24px; background: linear-gradient(45deg, #2196F3, #1976D2); color: white; border: none; border-radius: 10px; cursor: pointer; transition: all 0.3s;">Jogar Online</button>
+            <button class="menu-button" data-mode="ai" style="width: 300px; padding: 20px; font-size: 24px; background: linear-gradient(45deg, #FF9800, #F57C00); color: white; border: none; border-radius: 10px; cursor: pointer; transition: all 0.3s;">Jogar com IA</button>
+        </div>
+    </div>
+
+    <div id="game-area" style="display: none;">
         <div id="money-display">Dinheiro: $250</div>
         <div id="event-message" style="display: none;">EVENTO ATIVO!</div>
         <div id="restore-notification">Dados restaurados! ✅</div>
@@ -431,12 +451,45 @@
     </div>
 
     <script>
-        const socket = io();
-        const gameArea = document.getElementById('game-area');
-        const players = {};
-        const brainRots = {};
-        let myId;
-        let myPlayer;
+        let username = '';
+        let gameMode = '';
+
+        // Login screen logic
+        document.getElementById('enter-button').addEventListener('click', () => {
+            const input = document.getElementById('username');
+            if (input.value.trim()) {
+                username = input.value.trim();
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('menu-screen').style.display = 'flex';
+            } else {
+                alert('Por favor, digite um nome de usuário!');
+            }
+        });
+
+        // Menu buttons logic
+        document.querySelectorAll('.menu-button').forEach(button => {
+            button.addEventListener('click', () => {
+                gameMode = button.dataset.mode;
+                document.getElementById('menu-screen').style.display = 'none';
+                document.getElementById('game-area').style.display = 'block';
+                startGame();
+            });
+        });
+
+        function startGame() {
+            const socket = io();
+            const gameArea = document.getElementById('game-area');
+            const players = {};
+            const brainRots = {};
+            let myId;
+            let myPlayer;
+
+            // Send username and mode on connection
+            socket.on('connect', () => {
+                console.log('Conectado ao servidor!');
+                myId = socket.id;
+                socket.emit('joinGame', { username, mode: gameMode });
+            });
 
         const CONVEYOR_BELT_PROPS = {
             x: gameArea.offsetWidth / 2 - 100 / 2, // Centraliza no mapa
@@ -850,7 +903,8 @@
         }
 
         gameLoop();
-    </script>
+    }
+</script>
 
 </body>
 </html>
