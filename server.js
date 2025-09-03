@@ -273,7 +273,7 @@ io.on('connection', (socket) => {
         playerData.lastPosition = { x: mapWidth / 4, y: mapHeight / 2 };
         delete savedPlayers[saveKey]; // Remove from saved data
         dataRestored = true;
-        console.log(`Player restored data for ${saveKey}`);
+        console.log(`Player restored data for ${saveKey} - Inventory: ${playerData.inventory.length} items, Money: $${playerData.money}`);
     } else {
         // Create new player
         playerData = {
@@ -303,6 +303,15 @@ io.on('connection', (socket) => {
         dataRestored: dataRestored
     });
 
+    // Send inventory and money updates to all clients to show restored data
+    setTimeout(() => {
+        io.emit('updateInventories', players);
+        io.emit('updateMoney', players);
+        // Also send specifically to the reconnecting player
+        socket.emit('updateInventories', players);
+        socket.emit('updateMoney', players);
+    }, 100); // Small delay to ensure base assignment is processed first
+
     socket.broadcast.emit('updatePlayers', players);
 
     socket.on('playerMove', (data) => {
@@ -310,24 +319,24 @@ io.on('connection', (socket) => {
         if (player) {
             // Validate input
             if (typeof data.dx !== 'number' || typeof data.dy !== 'number' ||
-                Math.abs(data.dx) > 10 || Math.abs(data.dy) > 10) {
+                Math.abs(data.dx) > 15 || Math.abs(data.dy) > 15) {
                 socket.emit('moveRejected', 'Movimento inválido detectado.');
                 return;
             }
 
-            // Rate limiting (max 10 moves per second)
+            // Rate limiting (max 30 moves per second for smoother movement)
             const now = Date.now();
-            if (now - player.lastMoveTime < 100) {
+            if (now - player.lastMoveTime < 33) { // ~30 FPS
                 return; // Too fast, ignore
             }
             player.lastMoveTime = now;
 
-            // Speed validation
+            // Speed validation - allow faster movement
             const newX = player.x + data.dx;
             const newY = player.y + data.dy;
             const distance = Math.sqrt((newX - player.lastPosition.x) ** 2 + (newY - player.lastPosition.y) ** 2);
 
-            if (distance > 5) { // Max 5 pixels per move
+            if (distance > 10) { // Max 10 pixels per move (increased from 5)
                 socket.emit('moveRejected', 'Movimento muito rápido detectado.');
                 return;
             }
@@ -466,8 +475,11 @@ io.on('connection', (socket) => {
                 baseLockTime: 0
             };
 
-            // Clear brainrots from base visually
+            // Clear brainrots from base visually for all clients
             io.emit('clearBaseBrainrots', { baseId: player.baseId });
+
+            // Send inventory update to clear the base slots
+            io.emit('updateInventories', players);
 
             // Make base available again
             availableBases.push(baseNumber);
