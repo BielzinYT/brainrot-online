@@ -1,8 +1,15 @@
-i// server.js
+// server.js
 const express = require('express');
 const app = express();
 const http = require('http').createServer(app);
-const io = require('socket.io')(http);
+const io = require('socket.io')(http, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000
+});
 const path = require('path');
 const PORT = process.env.PORT || 3000;
 
@@ -199,169 +206,308 @@ setInterval(spawnBrainRot, 1500);
 
 // AI functions removed - AI mode eliminated
 
-// Money generation
+// Money generation and cleanup system
 setInterval(() => {
-    for (const playerId in players) {
-        const player = players[playerId];
-        let totalGeneration = 0;
-        player.inventory.forEach(rot => {
-            const rotType = BRAIN_ROT_TYPES.find(type => type.name === rot.name);
-            if (rotType) {
-                totalGeneration += rotType.generationRate;
+    try {
+        const currentTime = Date.now();
+        const inactivePlayers = [];
+
+        for (const playerId in players) {
+            const player = players[playerId];
+
+            // Check for inactive players (no heartbeat for 30 seconds)
+            if (player.lastHeartbeat && currentTime - player.lastHeartbeat > 30000) {
+                console.log(`Player ${player.username} marked as inactive`);
+                inactivePlayers.push(playerId);
+                continue;
+            }
+
+            // Generate money from inventory
+            let totalGeneration = 0;
+            player.inventory.forEach(rot => {
+                const rotType = BRAIN_ROT_TYPES.find(type => type.name === rot.name);
+                if (rotType) {
+                    totalGeneration += rotType.generationRate;
+                }
+            });
+
+            // Apply generation upgrade multiplier
+            const generationMultiplier = BASE_UPGRADES.generation.levels[player.upgrades.generation];
+            player.money += totalGeneration * generationMultiplier;
+        }
+
+        // Clean up inactive players
+        inactivePlayers.forEach(playerId => {
+            const player = players[playerId];
+            if (player) {
+                console.log(`Cleaning up inactive player ${player.username}`);
+
+                // Make base available again
+                availableBases.push(player.baseNumber);
+                availableBases.sort();
+
+                // Remove player
+                delete players[playerId];
             }
         });
 
-        // Apply generation upgrade multiplier
-        const generationMultiplier = BASE_UPGRADES.generation.levels[player.upgrades.generation];
-        player.money += totalGeneration * generationMultiplier;
+        // Broadcast money updates if there are active players
+        if (Object.keys(players).length > 0) {
+            io.emit('updateMoney', players);
+        }
+
+    } catch (error) {
+        console.error('Error in money generation loop:', error);
     }
-    io.emit('updateMoney', players);
 }, 1000); // Every second
 
 // Bot behavior removed - AI mode eliminated
 
 // Loop de atualização do servidor
 setInterval(() => {
-    for (const rotId in brainRots) {
-        const rot = brainRots[rotId];
-        if (rot.owner && rot.targetBase) {
-            // Move towards base
-            const target = BASE_POSITIONS[rot.targetBase];
-            const dx = target.x - rot.x;
-            const dy = target.y - rot.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < 5) {
-                // Reached base, add to inventory if space
-                const player = players[rot.owner];
-                const maxCapacity = BASE_UPGRADES.capacity.levels[player.upgrades.capacity];
-                if (player && player.inventory.length < maxCapacity) {
-                    player.inventory.push({
-                        id: rot.id,
-                        name: rot.name,
-                        rarity: rot.rarity,
-                        class: rot.class
-                    });
-                    io.emit('updateInventories', players);
+    try {
+        const currentTime = Date.now();
+        const rotsToDelete = [];
+
+        for (const rotId in brainRots) {
+            const rot = brainRots[rotId];
+
+            // Initialize lastUpdate if not set
+            if (!rot.lastUpdate) {
+                rot.lastUpdate = currentTime;
+            }
+
+            if (rot.owner && rot.targetBase) {
+                // Move towards base
+                const target = BASE_POSITIONS[rot.targetBase];
+                if (!target) {
+                    console.error(`Invalid target base: ${rot.targetBase}`);
+                    rotsToDelete.push(rotId);
+                    continue;
                 }
-                delete brainRots[rotId];
-            } else {
-                const speed = 2;
-                rot.x += (dx / dist) * speed;
-                rot.y += (dy / dist) * speed;
-            }
-        } else if (!rot.owner) {
-            rot.y += CONVEYOR_BELT_PROPS.speed; // Move o Brain Rot para baixo
 
-            // Se o Brain Rot sair da parte inferior do mapa, remove-o
-            if (rot.y > mapHeight) { // Usar mapHeight para ir até o fim da tela
-                delete brainRots[rotId];
+                const dx = target.x - rot.x;
+                const dy = target.y - rot.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < 5) {
+                    // Reached base, add to inventory if space
+                    const player = players[rot.owner];
+                    if (player) {
+                        const maxCapacity = BASE_UPGRADES.capacity.levels[player.upgrades.capacity];
+                        if (player.inventory.length < maxCapacity) {
+                            player.inventory.push({
+                                id: rot.id,
+                                name: rot.name,
+                                rarity: rot.rarity,
+                                class: rot.class
+                            });
+                            io.emit('updateInventories', players);
+                        }
+                    }
+                    rotsToDelete.push(rotId);
+                } else {
+                    const speed = 2;
+                    rot.x += (dx / dist) * speed;
+                    rot.y += (dy / dist) * speed;
+                    rot.lastUpdate = currentTime;
+                }
+            } else if (!rot.owner) {
+                rot.y += CONVEYOR_BELT_PROPS.speed; // Move o Brain Rot para baixo
+
+                // Se o Brain Rot sair da parte inferior do mapa, remove-o
+                if (rot.y > mapHeight) {
+                    rotsToDelete.push(rotId);
+                } else {
+                    rot.lastUpdate = currentTime;
+                }
             }
         }
-    }
 
-    // Clean up old brain rots that might have been missed
-    const currentTime = Date.now();
-    for (const rotId in brainRots) {
-        const rot = brainRots[rotId];
-        if (!rot.lastUpdate) {
-            rot.lastUpdate = currentTime;
-        }
-
-        // Remove brain rots that haven't been updated in 30 seconds (stuck items)
-        if (currentTime - rot.lastUpdate > 30000) {
+        // Remove brain rots that are marked for deletion
+        rotsToDelete.forEach(rotId => {
             delete brainRots[rotId];
-            continue;
+        });
+
+        // Clean up old brain rots that might have been missed
+        for (const rotId in brainRots) {
+            const rot = brainRots[rotId];
+            // Remove brain rots that haven't been updated in 30 seconds (stuck items)
+            if (currentTime - rot.lastUpdate > 30000) {
+                console.log(`Removing stuck Brain Rot: ${rotId}`);
+                delete brainRots[rotId];
+            }
         }
 
-        rot.lastUpdate = currentTime;
-    }
+        // Broadcast brain rot updates
+        io.emit('updateBrainRots', brainRots);
 
-    io.emit('updateBrainRots', brainRots);
+    } catch (error) {
+        console.error('Error in server update loop:', error);
+    }
 }, 1000 / 60); // Atualiza 60 vezes por segundo
 
 
 io.on('connection', (socket) => {
     console.log('Um novo jogador se conectou:', socket.id);
 
+    // Handle connection errors
+    socket.on('error', (error) => {
+        console.error('Socket error for player', socket.id, ':', error);
+    });
+
+    // Heartbeat system for connection monitoring
+    socket.on('heartbeat', (data) => {
+        const player = players[socket.id];
+        if (player) {
+            player.lastHeartbeat = Date.now();
+            socket.emit('heartbeat', { serverTime: Date.now() });
+        }
+    });
+
+    socket.on('disconnect', (reason) => {
+        console.log('Player disconnected:', socket.id, 'Reason:', reason);
+        // Cleanup will be handled in the disconnect event below
+    });
+
     socket.on('joinGame', (data) => {
-        const { username, mode } = data;
-        gameMode = mode;
-
-        // Handle different game modes
-        if (mode === 'solo') {
-            // Solo mode: allow multiple solo players, each playing independently
-            if (availableBases.length === 0) {
-                socket.emit('serverFull', 'Servidor cheio! Máximo 6 jogadores.');
+        try {
+            // Validate input data
+            if (!data || typeof data !== 'object') {
+                socket.emit('serverError', 'Dados inválidos recebidos.');
                 socket.disconnect();
                 return;
             }
-        } else if (mode === 'online') {
-            // Online mode: normal multiplayer
-            if (availableBases.length === 0) {
-                socket.emit('serverFull', 'Servidor cheio! Máximo 6 jogadores.');
+
+            const { username, mode } = data;
+
+            // Validate username
+            if (!username || typeof username !== 'string' || username.trim().length === 0 || username.length > 20) {
+                socket.emit('serverError', 'Nome de usuário inválido. Deve ter entre 1 e 20 caracteres.');
                 socket.disconnect();
                 return;
             }
-        }
 
-        // Set owner if first player
-        if (ownerId === null) {
-            ownerId = socket.id;
-        }
-
-        // Assign the lowest available base
-        const baseNumber = availableBases.shift();
-        const baseId = `base-${baseNumber}`;
-
-        // Create new player with initial state
-        const playerData = {
-            x: mapWidth / 4,
-            y: mapHeight / 2,
-            id: socket.id,
-            username: username,
-            baseId: baseId,
-            baseNumber: baseNumber,
-            inventory: [],
-            money: 250,
-            baseLocked: false,
-            baseLockTime: 0,
-            lastMoveTime: Date.now(),
-            lastPosition: { x: mapWidth / 4, y: mapHeight / 2 },
-            upgrades: {
-                capacity: 0, // Level 0 = 6 slots
-                generation: 0 // Level 0 = 1.0x generation
+            // Validate game mode
+            if (!mode || !['solo', 'online'].includes(mode)) {
+                socket.emit('serverError', 'Modo de jogo inválido.');
+                socket.disconnect();
+                return;
             }
-        };
 
-        players[socket.id] = playerData;
+            gameMode = mode;
 
-        socket.emit('updatePlayers', players);
-        socket.emit('updateBrainRots', brainRots);
-        socket.emit('assignBase', {
-            baseId,
-            playerId: socket.id,
-            baseNumber,
-            isOwner: baseNumber === 1,
-            dataRestored: false
-        });
+            // Check if player is already connected
+            if (players[socket.id]) {
+                socket.emit('serverError', 'Jogador já conectado.');
+                socket.disconnect();
+                return;
+            }
 
-        // Send inventory and money updates
-        setTimeout(() => {
-            io.emit('updateInventories', players);
-            io.emit('updateMoney', players);
-            socket.emit('updateInventories', players);
-            socket.emit('updateMoney', players);
-        }, 100);
+            // Handle different game modes
+            if (mode === 'solo') {
+                // Solo mode: allow multiple solo players, each playing independently
+                if (availableBases.length === 0) {
+                    socket.emit('serverFull', 'Servidor cheio! Máximo 6 jogadores.');
+                    socket.disconnect();
+                    return;
+                }
+            } else if (mode === 'online') {
+                // Online mode: normal multiplayer
+                if (availableBases.length === 0) {
+                    socket.emit('serverFull', 'Servidor cheio! Máximo 6 jogadores.');
+                    socket.disconnect();
+                    return;
+                }
+            }
 
-        socket.broadcast.emit('updatePlayers', players);
+            // Set owner if first player
+            if (ownerId === null) {
+                ownerId = socket.id;
+            }
+
+            // Assign the lowest available base
+            const baseNumber = availableBases.shift();
+            const baseId = `base-${baseNumber}`;
+
+            // Create new player with initial state
+            const playerData = {
+                x: mapWidth / 4,
+                y: mapHeight / 2,
+                id: socket.id,
+                username: username.trim(),
+                baseId: baseId,
+                baseNumber: baseNumber,
+                inventory: [],
+                money: 250,
+                baseLocked: false,
+                baseLockTime: 0,
+                lastMoveTime: Date.now(),
+                lastPosition: { x: mapWidth / 4, y: mapHeight / 2 },
+                upgrades: {
+                    capacity: 0, // Level 0 = 6 slots
+                    generation: 0 // Level 0 = 1.0x generation
+                },
+                connectedAt: Date.now()
+            };
+
+            players[socket.id] = playerData;
+
+            console.log(`Player ${username} joined with base ${baseNumber}`);
+
+            // Send initial game state to new player
+            socket.emit('updatePlayers', players);
+            socket.emit('updateBrainRots', brainRots);
+            socket.emit('assignBase', {
+                baseId,
+                playerId: socket.id,
+                baseNumber,
+                isOwner: baseNumber === 1,
+                dataRestored: false
+            });
+
+            // Send inventory and money updates with delay to ensure proper initialization
+            setTimeout(() => {
+                try {
+                    io.emit('updateInventories', players);
+                    io.emit('updateMoney', players);
+                    socket.emit('updateInventories', players);
+                    socket.emit('updateMoney', players);
+                } catch (error) {
+                    console.error('Error sending initial updates:', error);
+                }
+            }, 100);
+
+            // Notify other players about new player
+            socket.broadcast.emit('updatePlayers', players);
+
+        } catch (error) {
+            console.error('Error in joinGame:', error);
+            socket.emit('serverError', 'Erro interno do servidor.');
+            socket.disconnect();
+        }
     });
 
     socket.on('playerMove', (data) => {
-        const player = players[socket.id];
-        if (player) {
-            // Validate input
-            if (typeof data.dx !== 'number' || typeof data.dy !== 'number' ||
-                Math.abs(data.dx) > 15 || Math.abs(data.dy) > 15) {
+        try {
+            const player = players[socket.id];
+            if (!player) {
+                socket.emit('moveRejected', 'Jogador não encontrado.');
+                return;
+            }
+
+            // Validate input data
+            if (!data || typeof data !== 'object') {
+                socket.emit('moveRejected', 'Dados de movimento inválidos.');
+                return;
+            }
+
+            const { dx, dy } = data;
+
+            // Validate movement values
+            if (typeof dx !== 'number' || typeof dy !== 'number' ||
+                isNaN(dx) || isNaN(dy) ||
+                Math.abs(dx) > 15 || Math.abs(dy) > 15) {
                 socket.emit('moveRejected', 'Movimento inválido detectado.');
                 return;
             }
@@ -373,210 +519,410 @@ io.on('connection', (socket) => {
             }
             player.lastMoveTime = now;
 
-            // Speed validation - allow faster movement
-            const newX = player.x + data.dx;
-            const newY = player.y + data.dy;
-            const distance = Math.sqrt((newX - player.lastPosition.x) ** 2 + (newY - player.lastPosition.y) ** 2);
+            // Calculate new position
+            const newX = player.x + dx;
+            const newY = player.y + dy;
 
-            if (distance > 10) { // Max 10 pixels per move (increased from 5)
+            // Speed validation - prevent teleportation
+            const distance = Math.sqrt((newX - player.lastPosition.x) ** 2 + (newY - player.lastPosition.y) ** 2);
+            if (distance > 10) { // Max 10 pixels per move
                 socket.emit('moveRejected', 'Movimento muito rápido detectado.');
                 return;
             }
 
-            player.x = newX;
-            player.y = newY;
-            player.lastPosition = { x: newX, y: newY };
-
             // Boundary validation
-            player.x = Math.max(0, Math.min(mapWidth - 30, player.x));
-            player.y = Math.max(0, Math.min(mapHeight - 30, player.y));
+            player.x = Math.max(0, Math.min(mapWidth - 30, newX));
+            player.y = Math.max(0, Math.min(mapHeight - 30, newY));
+            player.lastPosition = { x: player.x, y: player.y };
 
+            // Broadcast movement to all players
             io.emit('updatePlayers', players);
+
+        } catch (error) {
+            console.error('Error in playerMove:', error);
+            socket.emit('moveRejected', 'Erro interno no movimento.');
         }
     });
 
     socket.on('pickUpBrainRot', (data) => {
-        const player = players[socket.id];
-        if (!player) return;
+        try {
+            const player = players[socket.id];
+            if (!player) {
+                socket.emit('pickupFailed', 'Jogador não encontrado.');
+                return;
+            }
 
-        // Validate input
-        if (!data.rotId || typeof data.rotId !== 'string') {
-            socket.emit('pickupFailed', 'Dados inválidos.');
-            return;
-        }
+            // Validate input
+            if (!data || !data.rotId || typeof data.rotId !== 'string') {
+                socket.emit('pickupFailed', 'Dados inválidos.');
+                return;
+            }
 
-        const rot = brainRots[data.rotId];
-        if (rot && !rot.owner) {
+            const rot = brainRots[data.rotId];
+            if (!rot) {
+                socket.emit('pickupFailed', 'Brain Rot não encontrado.');
+                return;
+            }
+
+            if (rot.owner) {
+                socket.emit('pickupFailed', 'Brain Rot já foi coletado.');
+                return;
+            }
+
             const rotType = BRAIN_ROT_TYPES.find(type => type.name === rot.name);
+            if (!rotType) {
+                socket.emit('pickupFailed', 'Tipo de Brain Rot inválido.');
+                return;
+            }
+
             const maxCapacity = BASE_UPGRADES.capacity.levels[player.upgrades.capacity];
 
-            if (rotType && player.money >= rotType.price) {
-                if (player.inventory.length >= maxCapacity) {
-                    socket.emit('pickupFailed', `Base cheia! Capacidade máxima: ${maxCapacity}`);
-                    return;
-                }
-
-                player.money -= rotType.price;
-                rot.owner = socket.id;
-                rot.targetBase = player.baseId;
-                io.emit('updateBrainRots', brainRots);
-                io.emit('updateMoney', players);
-            } else {
+            if (player.money < rotType.price) {
                 socket.emit('pickupFailed', 'Dinheiro insuficiente!');
+                return;
             }
+
+            if (player.inventory.length >= maxCapacity) {
+                socket.emit('pickupFailed', `Base cheia! Capacidade máxima: ${maxCapacity}`);
+                return;
+            }
+
+            // Perform pickup
+            player.money -= rotType.price;
+            rot.owner = socket.id;
+            rot.targetBase = player.baseId;
+            rot.lastUpdate = Date.now();
+
+            // Broadcast updates
+            io.emit('updateBrainRots', brainRots);
+            io.emit('updateMoney', players);
+
+            console.log(`Player ${player.username} picked up ${rotType.name} for $${rotType.price}`);
+
+        } catch (error) {
+            console.error('Error in pickUpBrainRot:', error);
+            socket.emit('pickupFailed', 'Erro interno na coleta.');
         }
     });
 
     socket.on('stealBrainRot', (data) => {
-        const player = players[socket.id];
-        if (!player) return;
+        try {
+            const thief = players[socket.id];
+            if (!thief) {
+                socket.emit('stealFailed', 'Ladrão não encontrado.');
+                return;
+            }
 
-        // Validate input
-        if (!data.targetPlayerId || !data.rotId || typeof data.targetPlayerId !== 'string' || typeof data.rotId !== 'string') {
-            socket.emit('stealFailed', 'Dados inválidos.');
-            return;
-        }
+            // Validate input
+            if (!data || !data.targetPlayerId || !data.rotId ||
+                typeof data.targetPlayerId !== 'string' || typeof data.rotId !== 'string') {
+                socket.emit('stealFailed', 'Dados inválidos.');
+                return;
+            }
 
-        const thief = players[socket.id];
-        const target = players[data.targetPlayerId];
-        if (thief && target) {
+            const target = players[data.targetPlayerId];
+            if (!target) {
+                socket.emit('stealFailed', 'Jogador alvo não encontrado.');
+                return;
+            }
+
+            // Prevent stealing from yourself
+            if (data.targetPlayerId === socket.id) {
+                socket.emit('stealFailed', 'Você não pode roubar de si mesmo!');
+                return;
+            }
+
             // Check if target base is locked
             if (target.baseLocked && Date.now() < target.baseLockTime) {
                 socket.emit('stealFailed', 'Base bloqueada! Tente novamente mais tarde.');
                 return;
             }
-            const rotIndex = target.inventory.findIndex(rot => rot.id === data.rotId);
-            if (rotIndex !== -1) {
-                const stolenRot = target.inventory.splice(rotIndex, 1)[0];
-                thief.inventory.push(stolenRot);
-                io.emit('updateInventories', players);
+
+            // Check if thief has space in inventory
+            const thiefMaxCapacity = BASE_UPGRADES.capacity.levels[thief.upgrades.capacity];
+            if (thief.inventory.length >= thiefMaxCapacity) {
+                socket.emit('stealFailed', 'Seu inventário está cheio!');
+                return;
             }
+
+            const rotIndex = target.inventory.findIndex(rot => rot.id === data.rotId);
+            if (rotIndex === -1) {
+                socket.emit('stealFailed', 'Item não encontrado no inventário do alvo.');
+                return;
+            }
+
+            // Perform steal
+            const stolenRot = target.inventory.splice(rotIndex, 1)[0];
+            thief.inventory.push(stolenRot);
+
+            // Broadcast inventory updates
+            io.emit('updateInventories', players);
+
+            console.log(`Player ${thief.username} stole ${stolenRot.name} from ${target.username}`);
+
+        } catch (error) {
+            console.error('Error in stealBrainRot:', error);
+            socket.emit('stealFailed', 'Erro interno no roubo.');
         }
     });
 
     socket.on('lockBase', () => {
-        const player = players[socket.id];
-        if (player && !player.baseLocked) {
+        try {
+            const player = players[socket.id];
+            if (!player) {
+                socket.emit('lockFailed', 'Jogador não encontrado.');
+                return;
+            }
+
+            if (player.baseLocked) {
+                socket.emit('lockFailed', 'Base já está bloqueada.');
+                return;
+            }
+
+            // Lock the base
             player.baseLocked = true;
             player.baseLockTime = Date.now() + 60000; // 60 seconds
+
+            // Broadcast lock status
             io.emit('updateBaseLocks', players);
+
+            console.log(`Player ${player.username} locked base ${player.baseNumber}`);
+
             // Auto-unlock after 60 seconds
             setTimeout(() => {
-                player.baseLocked = false;
-                io.emit('updateBaseLocks', players);
+                try {
+                    if (player && player.baseLocked) {
+                        player.baseLocked = false;
+                        io.emit('updateBaseLocks', players);
+                        console.log(`Base ${player.baseNumber} auto-unlocked`);
+                    }
+                } catch (error) {
+                    console.error('Error in auto-unlock:', error);
+                }
             }, 60000);
+
+        } catch (error) {
+            console.error('Error in lockBase:', error);
+            socket.emit('lockFailed', 'Erro interno no bloqueio.');
         }
     });
 
     socket.on('sellBrainRot', (data) => {
-        const player = players[socket.id];
-        if (!player) return;
+        try {
+            const player = players[socket.id];
+            if (!player) {
+                socket.emit('sellFailed', 'Jogador não encontrado.');
+                return;
+            }
 
-        // Validate input
-        if (!data.rotId || typeof data.rotId !== 'string') {
-            socket.emit('sellFailed', 'Dados inválidos.');
-            return;
-        }
+            // Validate input
+            if (!data || !data.rotId || typeof data.rotId !== 'string') {
+                socket.emit('sellFailed', 'Dados inválidos.');
+                return;
+            }
 
-        const rotIndex = player.inventory.findIndex(rot => rot.id === data.rotId);
-        if (rotIndex !== -1) {
+            const rotIndex = player.inventory.findIndex(rot => rot.id === data.rotId);
+            if (rotIndex === -1) {
+                socket.emit('sellFailed', 'Item não encontrado no inventário.');
+                return;
+            }
+
             const soldRot = player.inventory.splice(rotIndex, 1)[0];
             const rotType = BRAIN_ROT_TYPES.find(type => type.name === soldRot.name);
-            if (rotType) {
-                player.money += rotType.sellPrice;
+
+            if (!rotType) {
+                socket.emit('sellFailed', 'Tipo de Brain Rot inválido.');
+                return;
             }
+
+            // Add sell price to player money
+            player.money += rotType.sellPrice;
+
+            // Broadcast updates
             io.emit('updateInventories', players);
             io.emit('updateMoney', players);
+
+            console.log(`Player ${player.username} sold ${rotType.name} for $${rotType.sellPrice}`);
+
+        } catch (error) {
+            console.error('Error in sellBrainRot:', error);
+            socket.emit('sellFailed', 'Erro interno na venda.');
         }
     });
 
     socket.on('triggerAdminEvent', (data) => {
-        // Only allow player with base 1 (owner)
-        const player = players[socket.id];
-        if (player && player.baseNumber === 1) {
-            const duration = data.duration || 30000; // Default 30s
+        try {
+            const player = players[socket.id];
+            if (!player) {
+                socket.emit('adminEventFailed', 'Jogador não encontrado.');
+                return;
+            }
+
+            // Only allow player with base 1 (owner)
+            if (player.baseNumber !== 1) {
+                socket.emit('adminEventFailed', 'Apenas o dono (base 1) pode ativar eventos admin.');
+                return;
+            }
+
+            // Validate input data
+            const duration = (data && typeof data.duration === 'number') ? data.duration : 30000;
+
+            // Validate duration (between 10 seconds and 5 minutes)
+            if (duration < 10000 || duration > 300000) {
+                socket.emit('adminEventFailed', 'Duração deve ser entre 10 e 300 segundos.');
+                return;
+            }
+
+            // Toggle admin event
             adminEventActive = !adminEventActive;
-            io.emit('adminEvent', { active: adminEventActive, duration: duration });
+
+            console.log(`Admin event ${adminEventActive ? 'activated' : 'deactivated'} by ${player.username} for ${duration}ms`);
+
+            // Broadcast to all players
+            io.emit('adminEvent', {
+                active: adminEventActive,
+                duration: duration,
+                triggeredBy: player.username
+            });
+
             if (adminEventActive) {
                 // Auto-disable after duration
                 setTimeout(() => {
-                    adminEventActive = false;
-                    io.emit('adminEvent', { active: false });
+                    try {
+                        adminEventActive = false;
+                        io.emit('adminEvent', { active: false });
+                        console.log('Admin event auto-deactivated');
+                    } catch (error) {
+                        console.error('Error in admin event auto-disable:', error);
+                    }
                 }, duration);
             }
+
+        } catch (error) {
+            console.error('Error in triggerAdminEvent:', error);
+            socket.emit('adminEventFailed', 'Erro interno no evento admin.');
         }
     });
 
     socket.on('upgradeBase', (data) => {
-        const player = players[socket.id];
-        if (!player) return;
+        try {
+            const player = players[socket.id];
+            if (!player) {
+                socket.emit('upgradeFailed', 'Jogador não encontrado.');
+                return;
+            }
 
-        const { upgradeType, baseNumber } = data;
+            // Validate input
+            if (!data || typeof data !== 'object') {
+                socket.emit('upgradeFailed', 'Dados inválidos.');
+                return;
+            }
 
-        // Validate input
-        if (!upgradeType || !['capacity', 'generation'].includes(upgradeType)) {
-            socket.emit('upgradeFailed', 'Tipo de upgrade inválido.');
-            return;
+            const { upgradeType, baseNumber } = data;
+
+            // Validate upgrade type
+            if (!upgradeType || !['capacity', 'generation'].includes(upgradeType)) {
+                socket.emit('upgradeFailed', 'Tipo de upgrade inválido.');
+                return;
+            }
+
+            // Validate that player owns the base they're trying to upgrade
+            if (baseNumber && baseNumber !== player.baseNumber) {
+                socket.emit('upgradeFailed', 'Você só pode fazer upgrade na sua própria base!');
+                return;
+            }
+
+            // Validate upgrade data exists
+            if (!BASE_UPGRADES[upgradeType]) {
+                socket.emit('upgradeFailed', 'Dados de upgrade não encontrados.');
+                return;
+            }
+
+            const currentLevel = player.upgrades[upgradeType];
+
+            // Check if max level reached
+            if (currentLevel >= BASE_UPGRADES[upgradeType].levels.length - 1) {
+                socket.emit('upgradeFailed', 'Nível máximo alcançado!');
+                return;
+            }
+
+            const upgradeCost = BASE_UPGRADES[upgradeType].costs[currentLevel];
+
+            // Validate cost
+            if (typeof upgradeCost !== 'number' || upgradeCost < 0) {
+                socket.emit('upgradeFailed', 'Custo de upgrade inválido.');
+                return;
+            }
+
+            // Check if player has enough money
+            if (player.money < upgradeCost) {
+                socket.emit('upgradeFailed', 'Dinheiro insuficiente!');
+                return;
+            }
+
+            // Perform upgrade
+            player.money -= upgradeCost;
+            player.upgrades[upgradeType] = currentLevel + 1;
+
+            // Validate new level
+            const newLevel = player.upgrades[upgradeType];
+            const newValue = BASE_UPGRADES[upgradeType].levels[newLevel];
+
+            if (typeof newValue !== 'number') {
+                socket.emit('upgradeFailed', 'Valor de upgrade inválido.');
+                return;
+            }
+
+            // Send success response with new level and remaining money
+            socket.emit('upgradeSuccess', {
+                upgradeType,
+                newLevel: newLevel,
+                newValue: newValue,
+                remainingMoney: player.money
+            });
+
+            // Update money for all clients
+            io.emit('updateMoney', players);
+
+            console.log(`Player ${player.username} upgraded ${upgradeType} to level ${newLevel} for $${upgradeCost}`);
+
+        } catch (error) {
+            console.error('Error in upgradeBase:', error);
+            socket.emit('upgradeFailed', 'Erro interno no upgrade.');
         }
-
-        // Validate that player owns the base they're trying to upgrade
-        if (baseNumber && baseNumber !== player.baseNumber) {
-            socket.emit('upgradeFailed', 'Você só pode fazer upgrade na sua própria base!');
-            return;
-        }
-
-        const currentLevel = player.upgrades[upgradeType];
-
-        // Check if max level reached
-        if (currentLevel >= BASE_UPGRADES[upgradeType].levels.length - 1) {
-            socket.emit('upgradeFailed', 'Nível máximo alcançado!');
-            return;
-        }
-
-        const upgradeCost = BASE_UPGRADES[upgradeType].costs[currentLevel];
-
-        // Check if player has enough money
-        if (player.money < upgradeCost) {
-            socket.emit('upgradeFailed', 'Dinheiro insuficiente!');
-            return;
-        }
-
-        // Perform upgrade
-        player.money -= upgradeCost;
-        player.upgrades[upgradeType] = currentLevel + 1;
-
-        // Send success response with new level and remaining money
-        socket.emit('upgradeSuccess', {
-            upgradeType,
-            newLevel: player.upgrades[upgradeType],
-            newValue: BASE_UPGRADES[upgradeType].levels[player.upgrades[upgradeType]],
-            remainingMoney: player.money
-        });
-
-        // Update money for all clients
-        io.emit('updateMoney', players);
     });
 
-    socket.on('disconnect', () => {
-        console.log('Um jogador se desconectou:', socket.id);
-        if (players[socket.id]) {
-            const player = players[socket.id];
-            const baseNumber = player.baseNumber;
+    socket.on('disconnect', (reason) => {
+        try {
+            console.log(`Player ${socket.id} disconnected. Reason: ${reason}`);
 
-            // Clear brainrots from base visually for all clients
-            io.emit('clearBaseBrainrots', { baseId: player.baseId });
+            if (players[socket.id]) {
+                const player = players[socket.id];
+                const baseNumber = player.baseNumber;
 
-            // Send inventory update to clear the base slots
-            io.emit('updateInventories', players);
+                console.log(`Cleaning up player ${player.username} (base ${baseNumber})`);
 
-            // Make base available again
-            availableBases.push(baseNumber);
-            availableBases.sort();
+                // Clear brainrots from base visually for all clients
+                io.emit('clearBaseBrainrots', { baseId: player.baseId });
 
+                // Send inventory update to clear the base slots
+                io.emit('updateInventories', players);
 
-            delete players[socket.id];
+                // Make base available again
+                availableBases.push(baseNumber);
+                availableBases.sort();
+
+                // Remove player from game
+                delete players[socket.id];
+
+                // Notify all players about the disconnection
+                io.emit('updatePlayers', players);
+
+                console.log(`Player cleanup completed for ${player.username}`);
+            }
+        } catch (error) {
+            console.error('Error in disconnect handler:', error);
         }
-        io.emit('updatePlayers', players);
     });
 });
 
